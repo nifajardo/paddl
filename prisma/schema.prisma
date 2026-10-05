@@ -1,0 +1,84 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String?
+  email     String?  @unique
+  password  String?  // Simplistic auth for MVP
+  role      String   @default("CASHIER") // ADMIN, MANAGER, CASHIER
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  transactions Transaction[]
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  products    Product[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  barcode     String?  @unique
+  description String?
+  price       Float
+  cost        Float    @default(0)
+  stock       Int      @default(0)
+  imageUrl    String?
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  transactionItems TransactionItem[]
+}
+
+model Customer {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String?
+  email       String?
+  balance     Float    @default(0) // For debt tracking
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  transactions Transaction[]
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  total       Float
+  status      String   @default("COMPLETED") // COMPLETED, REFUNDED
+  paymentType String   @default("CASH") // CASH, GCASH, DEBT
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       TransactionItem[]
+}
+
+model TransactionItem {
+  id            String   @id @default(cuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  quantity      Int
+  price         Float    // Captured price at time of sale
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
