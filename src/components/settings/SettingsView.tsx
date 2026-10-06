@@ -22,8 +22,22 @@ import {
   WifiOff,
   Copy,
   ExternalLink,
-  Server
+  Server,
+  QrCode,
+  ShieldCheck,
+  Lock,
+  Smartphone,
+  KeyRound,
+  Type,
+  UserPlus,
+  Trash2,
+  Calendar,
+  Check,
+  Sliders,
+  AlertTriangle
 } from "lucide-react";
+import { UserRole, StaffUser } from "@/types";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
 export function SettingsView() {
   const { 
@@ -36,6 +50,11 @@ export function SettingsView() {
     isSupabaseActive,
     updateSettings, 
     switchStaff, 
+    addStaff,
+    updateStaff,
+    deleteStaff,
+    toggleStaffActive,
+    setFontSizeMode,
     syncCloud, 
     exportDataJson, 
     importDataJson, 
@@ -49,8 +68,27 @@ export function SettingsView() {
   const [phone, setPhone] = useState(settings.phone);
   const [tinNumber, setTinNumber] = useState(settings.tinNumber);
   const [receiptFooter, setReceiptFooter] = useState(settings.receiptFooterMessage);
+  const [gcashNumber, setGcashNumber] = useState(settings.gcashNumber || "0917-123-4567");
+  const [mayaNumber, setMayaNumber] = useState(settings.mayaNumber || "0918-987-6543");
+  const [ownerPin, setOwnerPin] = useState(settings.ownerPin || "1234");
+  const [requirePinForReports, setRequirePinForReports] = useState(settings.requirePinForReports ?? true);
+
+  // Accessibility & Display State
+  const [fontSizeMode, setLocalFontSizeMode] = useState<"NORMAL" | "LARGE">(settings.fontSizeMode || "NORMAL");
+  const [expirationWarningDays, setExpirationWarningDays] = useState<number>(settings.expirationWarningDays || 30);
+  const [displaySaved, setDisplaySaved] = useState(false);
+
+  // Staff Management State
+  const [isAddStaffOpen, setIsAddStaffOpen] = useState(false);
+  const [newStaffName, setNewStaffName] = useState("");
+  const [newStaffEmail, setNewStaffEmail] = useState("");
+  const [newStaffRole, setNewStaffRole] = useState<UserRole>("CASHIER");
+  const [newStaffPin, setNewStaffPin] = useState("1234");
+  const [editingPermissionsStaffId, setEditingPermissionsStaffId] = useState<string | null>(null);
 
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [walletSaved, setWalletSaved] = useState(false);
+  const [securitySaved, setSecuritySaved] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
   const [importText, setImportText] = useState("");
   const [importStatus, setImportStatus] = useState<string | null>(null);
@@ -67,6 +105,83 @@ export function SettingsView() {
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
+  };
+
+  const handleSaveWallets = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateSettings({
+      gcashNumber: gcashNumber.trim(),
+      mayaNumber: mayaNumber.trim(),
+    });
+    setWalletSaved(true);
+    setTimeout(() => setWalletSaved(false), 2500);
+  };
+
+  const handleSaveSecurity = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateSettings({
+      ownerPin: ownerPin.trim() || "1234",
+      requirePinForReports,
+    });
+    setSecuritySaved(true);
+    setTimeout(() => setSecuritySaved(false), 2500);
+  };
+
+  const handleSaveDisplay = (e: React.FormEvent) => {
+    e.preventDefault();
+    setFontSizeMode(fontSizeMode);
+    updateSettings({
+      fontSizeMode,
+      expirationWarningDays,
+    });
+    setDisplaySaved(true);
+    setTimeout(() => setDisplaySaved(false), 2500);
+  };
+
+  const handleAddStaffSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStaffName.trim() || !newStaffEmail.trim()) return;
+
+    addStaff({
+      name: newStaffName.trim(),
+      email: newStaffEmail.trim().toLowerCase(),
+      role: newStaffRole,
+      pin: newStaffPin.trim() || "1234",
+      isActive: true,
+      permissions: {
+        canVoidTransactions: newStaffRole === "OWNER" || newStaffRole === "MANAGER",
+        canProcessReturns: newStaffRole === "OWNER" || newStaffRole === "MANAGER",
+        canViewFinancialReports: newStaffRole === "OWNER" || newStaffRole === "MANAGER",
+        canManageInventory: true,
+        canManageStaff: newStaffRole === "OWNER",
+        canModifySettings: newStaffRole === "OWNER",
+      },
+    });
+
+    setNewStaffName("");
+    setNewStaffEmail("");
+    setNewStaffRole("CASHIER");
+    setNewStaffPin("1234");
+    setIsAddStaffOpen(false);
+  };
+
+  const handleToggleStaffPermission = (staffId: string, permKey: string) => {
+    const target = staffList.find((s) => s.id === staffId);
+    if (!target) return;
+    const currentPerms = target.permissions || {
+      canVoidTransactions: false,
+      canProcessReturns: false,
+      canViewFinancialReports: false,
+      canManageInventory: true,
+      canManageStaff: false,
+      canModifySettings: false,
+    };
+    updateStaff(staffId, {
+      permissions: {
+        ...currentPerms,
+        [permKey]: !(currentPerms as any)[permKey],
+      },
+    });
   };
 
   const handleCopySqlScript = () => {
@@ -345,68 +460,401 @@ CREATE POLICY "Allow all on expenses" ON expenses FOR ALL USING (true) WITH CHEC
             </CardContent>
           </Card>
 
-          {/* Multi-User & Role Management */}
+          {/* BSP QR Ph & E-Wallets */}
+          <Card className="bg-white border-slate-200">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between border-b pb-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <QrCode className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900">BSP QR Ph & E-Wallet Settlement</h3>
+                    <p className="text-[11px] text-slate-500">Auto-displays in POS checkout for GCash, Maya, and online bank payments</p>
+                  </div>
+                </div>
+                {walletSaved && (
+                  <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 text-xs flex items-center gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Saved!
+                  </Badge>
+                )}
+              </div>
+
+              <form onSubmit={handleSaveWallets} className="space-y-4 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="set-gcash" className="text-xs font-semibold flex items-center gap-1 text-slate-700">
+                      <Smartphone className="h-3.5 w-3.5 text-blue-600" />
+                      GCash Registered Mobile No.
+                    </Label>
+                    <Input
+                      id="set-gcash"
+                      value={gcashNumber}
+                      onChange={(e) => setGcashNumber(e.target.value)}
+                      placeholder="e.g. 0917-123-4567"
+                      className="text-xs h-9 font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Shown to customers on the interactive QR Ph card</p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="set-maya" className="text-xs font-semibold flex items-center gap-1 text-slate-700">
+                      <Smartphone className="h-3.5 w-3.5 text-emerald-600" />
+                      Maya Registered Mobile No.
+                    </Label>
+                    <Input
+                      id="set-maya"
+                      value={mayaNumber}
+                      onChange={(e) => setMayaNumber(e.target.value)}
+                      placeholder="e.g. 0918-987-6543"
+                      className="text-xs h-9 font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Alternative QR Ph e-wallet account</p>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <Button type="submit" size="sm" className="bg-blue-600 hover:bg-blue-700 text-white font-semibold">
+                    <Save className="h-4 w-4 mr-1.5" /> Save E-Wallet Accounts
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Anti-Kupit & Security PIN Lock */}
+          <Card className="bg-white border-slate-200">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between border-b pb-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-purple-600" />
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900">Anti-Kupit & Staff Security Lock</h3>
+                    <p className="text-[11px] text-slate-500">Protect confidential gross margins, COGS, and financial reports from cashier access</p>
+                  </div>
+                </div>
+                {securitySaved && (
+                  <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 text-xs flex items-center gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Saved!
+                  </Badge>
+                )}
+              </div>
+
+              <form onSubmit={handleSaveSecurity} className="space-y-4 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                  <div className="space-y-1">
+                    <Label htmlFor="set-pin" className="text-xs font-semibold flex items-center gap-1 text-slate-700">
+                      <KeyRound className="h-3.5 w-3.5 text-purple-600" />
+                      Owner 4-Digit Master PIN
+                    </Label>
+                    <Input
+                      id="set-pin"
+                      type="password"
+                      maxLength={4}
+                      value={ownerPin}
+                      onChange={(e) => setOwnerPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      placeholder="1234"
+                      className="text-xs h-9 font-mono tracking-widest text-center font-bold text-slate-900"
+                    />
+                    <p className="text-[10px] text-slate-400">Used to unlock Financial Reports & Settings when cashier is on duty</p>
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                      <Lock className="h-3.5 w-3.5 text-slate-500" />
+                      Security Lockout Policy
+                    </Label>
+                    <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-200 bg-slate-50/70 cursor-pointer hover:bg-slate-100/70 transition">
+                      <input
+                        type="checkbox"
+                        checked={requirePinForReports}
+                        onChange={(e) => setRequirePinForReports(e.target.checked)}
+                        className="mt-0.5 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                      />
+                      <span className="text-[11px] text-slate-700 leading-tight">
+                        <strong className="block text-slate-900">Enforce PIN Gate for Cashiers</strong>
+                        Prompts 4-digit PIN pad when any staff role other than OWNER tries to view Sales Reports or Store Settings.
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <Button type="submit" size="sm" className="bg-purple-600 hover:bg-purple-700 text-white font-semibold">
+                    <Save className="h-4 w-4 mr-1.5" /> Save Security PIN
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Display & Accessibility (Senior Merchant Support) */}
+          <Card className="bg-white border-slate-200">
+            <CardContent className="p-5 space-y-4">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <Type className="h-5 w-5 text-emerald-600" />
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900">Display & Accessibility</h3>
+                    <p className="text-[11px] text-slate-500">Configure font size readability and stock expiration warning thresholds</p>
+                  </div>
+                </div>
+                {displaySaved && (
+                  <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 text-xs flex items-center gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Saved!
+                  </Badge>
+                )}
+              </div>
+
+              <form onSubmit={handleSaveDisplay} className="space-y-4 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Font Size Mode */}
+                  <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <Label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                      <Sliders className="h-3.5 w-3.5 text-emerald-600" />
+                      POS Text & Button Sizing:
+                    </Label>
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setLocalFontSizeMode("NORMAL")}
+                        className={`p-2.5 rounded-lg border text-left transition ${
+                          fontSizeMode === "NORMAL"
+                            ? "bg-emerald-600 text-white border-emerald-600 font-bold shadow-sm"
+                            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                        }`}
+                      >
+                        <span className="text-xs block">Normal (Standard)</span>
+                        <span className="text-[10px] opacity-80 block">Default compact view</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setLocalFontSizeMode("LARGE")}
+                        className={`p-2.5 rounded-lg border text-left transition ${
+                          fontSizeMode === "LARGE"
+                            ? "bg-emerald-600 text-white border-emerald-600 font-bold shadow-sm"
+                            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                        }`}
+                      >
+                        <span className="text-sm font-bold block">Large (Accessible)</span>
+                        <span className="text-[10px] opacity-80 block">For older store owners</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expiration Warning Days */}
+                  <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <Label htmlFor="set-exp-days" className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                      <Calendar className="h-3.5 w-3.5 text-amber-600" />
+                      Near-Expiry Alert Warning (Days):
+                    </Label>
+                    <p className="text-[10px] text-slate-500">
+                      Products expiring within this timeframe display an amber warning badge in POS & Inventory
+                    </p>
+                    <select
+                      id="set-exp-days"
+                      value={expirationWarningDays}
+                      onChange={(e) => setExpirationWarningDays(parseInt(e.target.value) || 30)}
+                      className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white font-semibold text-xs text-slate-800 focus:outline-none"
+                    >
+                      <option value={7}>7 Days Before Expiration (Strict Freshness)</option>
+                      <option value={14}>14 Days Before Expiration</option>
+                      <option value={30}>30 Days Before Expiration (Standard Retail)</option>
+                      <option value={60}>60 Days Before Expiration (Pharmacy / Wholesale)</option>
+                      <option value={90}>90 Days Before Expiration</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="pt-1 flex justify-end">
+                  <Button type="submit" size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
+                    <Save className="h-4 w-4 mr-1.5" /> Save Display & Expiry Preferences
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Multi-User & Role Management (RBAC) */}
           <Card className="bg-white border-slate-200">
             <CardContent className="p-5 space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <div className="flex items-center gap-2">
                   <Users className="h-5 w-5 text-indigo-600" />
-                  <h3 className="font-bold text-sm text-slate-900">Multi-User Staff & Role Permissions</h3>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900">User Access & Role-Based Permissions</h3>
+                    <p className="text-[11px] text-slate-500">
+                      Multi-device access control: Owner, Manager, Cashier, and Inventory Staff
+                    </p>
+                  </div>
                 </div>
-                <Badge variant="secondary" className="text-[11px] bg-indigo-50 text-indigo-700">
-                  Active Cashier: {currentStaff.name}
-                </Badge>
+                <Button
+                  size="sm"
+                  onClick={() => setIsAddStaffOpen(true)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs h-8 font-semibold gap-1"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  Add Employee
+                </Button>
               </div>
 
-              <p className="text-xs text-slate-500">
-                Unlike Peddlr (which is single-device/single-user), Peddlr Plus supports role-based team management across all your tablets and phones:
-              </p>
+              <div className="space-y-3">
+                {staffList.map((st) => {
+                  const isCurrent = st.id === currentStaff.id;
+                  const isOwner = st.role === "OWNER";
+                  const isEditingPermissions = editingPermissionsStaffId === st.id;
 
-              <div className="space-y-2">
-                {staffList.map((st) => (
-                  <div
-                    key={st.id}
-                    className={`p-3 rounded-lg border text-xs flex items-center justify-between transition ${
-                      st.id === currentStaff.id ? "bg-indigo-50/60 border-indigo-300" : "bg-white border-slate-200"
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900">{st.name}</span>
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] font-bold ${
-                            st.role === "OWNER"
-                              ? "bg-purple-50 text-purple-700 border-purple-200"
-                              : st.role === "MANAGER"
-                              ? "bg-blue-50 text-blue-700 border-blue-200"
-                              : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                          }`}
-                        >
-                          {st.role}
-                        </Badge>
+                  return (
+                    <div
+                      key={st.id}
+                      className={`p-3.5 rounded-xl border text-xs space-y-3 transition ${
+                        isCurrent
+                          ? "bg-indigo-50/50 border-indigo-300"
+                          : st.isActive === false
+                          ? "bg-slate-100/60 border-slate-200 opacity-60"
+                          : "bg-white border-slate-200"
+                      }`}
+                    >
+                      {/* Staff Header Row */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="h-8 w-8 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-700 text-xs">
+                            {st.name.charAt(0)}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-900 text-sm">{st.name}</span>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] font-bold ${
+                                  st.role === "OWNER"
+                                    ? "bg-purple-50 text-purple-700 border-purple-200"
+                                    : st.role === "MANAGER"
+                                    ? "bg-blue-50 text-blue-700 border-blue-200"
+                                    : st.role === "INVENTORY_STAFF"
+                                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                }`}
+                              >
+                                {st.role}
+                              </Badge>
+
+                              {st.isActive === false ? (
+                                <Badge variant="destructive" className="text-[9px] px-1.5 py-0 bg-slate-400">
+                                  Disabled
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-emerald-100 text-emerald-800">
+                                  Active
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-400">{st.email} • PIN: {st.pin}</p>
+                          </div>
+                        </div>
+
+                        {/* Top Action Buttons */}
+                        <div className="flex items-center gap-2">
+                          {isCurrent ? (
+                            <span className="text-[11px] font-bold text-indigo-700 flex items-center gap-1">
+                              <CheckCircle2 className="h-3.5 w-3.5" /> Current Session
+                            </span>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="xs"
+                              onClick={() => switchStaff(st.id)}
+                              className="text-xs h-7"
+                              disabled={st.isActive === false}
+                            >
+                              Switch User
+                            </Button>
+                          )}
+
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => toggleStaffActive(st.id)}
+                            disabled={isOwner}
+                            className={`text-xs h-7 ${st.isActive === false ? "text-emerald-700 hover:bg-emerald-50" : "text-amber-700 hover:bg-amber-50"}`}
+                          >
+                            {st.isActive === false ? "Enable Account" : "Disable"}
+                          </Button>
+
+                          {!isOwner && (
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              onClick={() => deleteStaff(st.id)}
+                              className="text-xs h-7 text-rose-600 hover:bg-rose-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">{st.email}</p>
-                    </div>
 
-                    <div>
-                      {st.id === currentStaff.id ? (
-                        <span className="text-[11px] font-bold text-indigo-700 flex items-center gap-1">
-                          <CheckCircle2 className="h-3.5 w-3.5" /> Current User
-                        </span>
-                      ) : (
+                      {/* Role and Permissions Control Bar */}
+                      <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-500 font-semibold">Change Role:</span>
+                          <select
+                            value={st.role}
+                            onChange={(e) => updateStaff(st.id, { role: e.target.value as UserRole })}
+                            disabled={isOwner}
+                            className="h-7 px-2 rounded border border-slate-200 bg-white font-medium text-xs text-slate-800 focus:outline-none"
+                          >
+                            <option value="OWNER">Owner / Admin</option>
+                            <option value="MANAGER">Manager</option>
+                            <option value="CASHIER">Cashier</option>
+                            <option value="INVENTORY_STAFF">Inventory Staff</option>
+                          </select>
+                        </div>
+
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="xs"
-                          onClick={() => switchStaff(st.id)}
-                          className="text-xs"
+                          onClick={() => setEditingPermissionsStaffId(isEditingPermissions ? null : st.id)}
+                          className="text-[11px] text-indigo-700 hover:bg-indigo-50 h-7"
                         >
-                          Switch to this Staff
+                          {isEditingPermissions ? "Hide Permissions ▲" : "Configure Permissions ▼"}
                         </Button>
+                      </div>
+
+                      {/* Expandable Permissions Checklist */}
+                      {isEditingPermissions && (
+                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                          {[
+                            { key: "canVoidTransactions", label: "Void / Cancel Sales" },
+                            { key: "canProcessReturns", label: "Process Returns & Refunds" },
+                            { key: "canViewFinancialReports", label: "View Financial P&L & Reports" },
+                            { key: "canManageInventory", label: "Manage Inventory & Restocks" },
+                            { key: "canManageStaff", label: "Create & Manage Staff Accounts" },
+                            { key: "canModifySettings", label: "Modify Store Settings & PINs" },
+                          ].map((perm) => {
+                            const isChecked = Boolean(st.permissions && (st.permissions as any)[perm.key]);
+                            return (
+                              <label
+                                key={perm.key}
+                                className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  disabled={isOwner}
+                                  onChange={() => handleToggleStaffPermission(st.id, perm.key)}
+                                  className="rounded border-slate-300 text-indigo-600 h-3.5 w-3.5"
+                                />
+                                <span className={isOwner ? "text-slate-500 font-semibold" : "text-slate-800"}>
+                                  {perm.label} {isOwner && "(Always Allowed)"}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
@@ -526,6 +974,91 @@ CREATE POLICY "Allow all on expenses" ON expenses FOR ALL USING (true) WITH CHEC
           </Card>
         </div>
       </div>
+
+      {/* ADD EMPLOYEE MODAL */}
+      {isAddStaffOpen && (
+        <Dialog open={isAddStaffOpen} onOpenChange={(open) => !open && setIsAddStaffOpen(false)}>
+          <DialogContent className="max-w-md p-6">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold flex items-center gap-2">
+                <UserPlus className="h-5 w-5 text-indigo-600" />
+                Add New Employee Account
+              </DialogTitle>
+            </DialogHeader>
+
+            <form onSubmit={handleAddStaffSubmit} className="space-y-3.5 text-xs">
+              <div className="space-y-1">
+                <Label htmlFor="staff-name" className="text-xs font-semibold">Employee Full Name</Label>
+                <Input
+                  id="staff-name"
+                  required
+                  placeholder="e.g. Maria Santos"
+                  value={newStaffName}
+                  onChange={(e) => setNewStaffName(e.target.value)}
+                  className="text-xs h-9"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="staff-email" className="text-xs font-semibold">Email / Account ID</Label>
+                <Input
+                  id="staff-email"
+                  type="email"
+                  required
+                  placeholder="e.g. maria@store.ph"
+                  value={newStaffEmail}
+                  onChange={(e) => setNewStaffEmail(e.target.value)}
+                  className="text-xs h-9"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="staff-role" className="text-xs font-semibold">Assigned Role</Label>
+                  <select
+                    id="staff-role"
+                    value={newStaffRole}
+                    onChange={(e) => setNewStaffRole(e.target.value as UserRole)}
+                    className="w-full h-9 px-2.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold"
+                  >
+                    <option value="CASHIER">Cashier (POS Sales)</option>
+                    <option value="MANAGER">Store Manager</option>
+                    <option value="INVENTORY_STAFF">Inventory Staff</option>
+                    <option value="OWNER">Owner / Admin</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="staff-pin" className="text-xs font-semibold">4-Digit Access PIN</Label>
+                  <Input
+                    id="staff-pin"
+                    type="password"
+                    maxLength={4}
+                    required
+                    placeholder="1234"
+                    value={newStaffPin}
+                    onChange={(e) => setNewStaffPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                    className="text-xs h-9 font-mono tracking-widest text-center font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-indigo-50 rounded-lg text-indigo-900 text-[11px] leading-relaxed">
+                Role defaults: <strong>Cashier</strong> can record sales and view customer utang, but requires Owner PIN to void sales or view confidential store profits.
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setIsAddStaffOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">
+                  Create Staff Account
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useStore } from "@/context/StoreContext";
 import { Product, CartItem, Transaction } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,7 +18,9 @@ import {
   CheckCircle2, 
   RotateCcw, 
   AlertCircle,
-  Tag
+  Tag,
+  Sparkles,
+  Zap
 } from "lucide-react";
 import { CheckoutModal } from "./CheckoutModal";
 import { ReceiptModal } from "./ReceiptModal";
@@ -26,24 +28,31 @@ import { BarcodeScannerModal } from "./BarcodeScannerModal";
 import { sound } from "@/lib/sounds";
 import { toast } from "sonner";
 
-const CATEGORIES = [
-  "All",
-  "Beverages",
-  "Canned Goods & Instant",
-  "Snacks & Sweets",
-  "Rice & Grains",
-  "Personal Care",
-  "Household & Cleaning",
-  "Cigarettes & Alcohol",
-  "Services & E-Load",
-];
-
 export function POSView() {
   const { products, customers, settings, processCheckout } = useStore();
 
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [cart, setCart] = useState<CartItem[]>([]);
+
+  // Dynamically derive categories from active products
+  const categories = useMemo(() => {
+    const unique = Array.from(
+      new Set(
+        products
+          .map((p) => p.category)
+          .filter((cat): cat is string => Boolean(cat) && cat !== "All")
+      )
+    );
+    return ["All", ...unique];
+  }, [products]);
+
+  // Reset filter to All if selected category does not exist in active shop preset
+  useEffect(() => {
+    if (selectedCategory !== "All" && !categories.includes(selectedCategory)) {
+      setSelectedCategory("All");
+    }
+  }, [categories, selectedCategory]);
 
   // Modals
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
@@ -124,6 +133,53 @@ export function POSView() {
     sound.click();
     setCart([]);
   };
+
+  // Suki Bestsellers / Fast Movers
+  const bestsellerProducts = useMemo(() => {
+    return products.filter((p) => p.isBestseller && p.isActive);
+  }, [products]);
+
+  // Hardware USB/Bluetooth Barcode Scanner Global Listener
+  useEffect(() => {
+    let barcodeBuffer = "";
+    let lastKeyTime = Date.now();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't capture when typing in text fields
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) {
+        return;
+      }
+
+      const currentTime = Date.now();
+      // If keystrokes are within 120ms, it is a hardware barcode scanner burst
+      if (currentTime - lastKeyTime > 120) {
+        barcodeBuffer = "";
+      }
+      lastKeyTime = currentTime;
+
+      if (e.key === "Enter") {
+        if (barcodeBuffer.length >= 3) {
+          const scannedCode = barcodeBuffer.trim();
+          const matched = products.find(
+            (p) => p.barcode === scannedCode || p.barcode.endsWith(scannedCode)
+          );
+          if (matched) {
+            addToCart(matched);
+            toast.success(`⚡ Hardware Scan: ${matched.name}`, { duration: 2000 });
+          } else {
+            toast.error(`Barcode not found in catalog: ${scannedCode}`);
+          }
+          barcodeBuffer = "";
+        }
+      } else if (e.key.length === 1) {
+        barcodeBuffer += e.key;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [products]);
 
   // Filtered products
   const filteredProducts = useMemo(() => {
@@ -332,22 +388,64 @@ export function POSView() {
           </div>
         </div>
 
-        {/* Category Filter Chips */}
+        {/* Suki Bestsellers / Fast Movers Quick-Keys Bar */}
+        {bestsellerProducts.length > 0 && (
+          <div className="px-3 sm:px-4 py-2 border-b border-emerald-100 bg-emerald-50/50 overflow-x-auto shrink-0 flex items-center gap-2 no-scrollbar">
+            <span className="text-[10px] uppercase font-black text-emerald-800 tracking-wider flex items-center gap-1 shrink-0">
+              <Sparkles className="h-3 w-3 text-amber-500 fill-amber-500" />
+              Suki Fast-Keys:
+            </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {bestsellerProducts.map((bp) => (
+                <button
+                  key={bp.id}
+                  onClick={() => addToCart(bp)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-emerald-200/90 text-xs font-semibold text-slate-800 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 shadow-2xs active:scale-95 transition-all group shrink-0"
+                  title={`1-tap add ${bp.name}`}
+                >
+                  <span className="text-sm">{bp.emoji}</span>
+                  <span className="truncate max-w-[120px]">{bp.name.split(" ")[0]} {bp.name.split(" ")[1] || ""}</span>
+                  <span className="font-bold text-emerald-700 group-hover:text-emerald-100 text-[11px]">
+                    ₱{bp.sellingPrice.toFixed(0)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Dynamic Category Filter Chips */}
         <div className="px-3 sm:px-4 py-2 border-b border-slate-200 bg-slate-50/70 overflow-x-auto shrink-0 flex gap-1.5 no-scrollbar">
-          {CATEGORIES.map((cat) => (
-            <Badge
-              key={cat}
-              variant={selectedCategory === cat ? "default" : "outline"}
-              onClick={() => setSelectedCategory(cat)}
-              className={`cursor-pointer text-xs px-3 py-1 font-medium whitespace-nowrap transition ${
-                selectedCategory === cat
-                  ? "bg-slate-900 text-white"
-                  : "bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
-              }`}
-            >
-              {cat}
-            </Badge>
-          ))}
+          {categories.map((cat) => {
+            const count = cat === "All"
+              ? products.filter((p) => p.isActive).length
+              : products.filter((p) => p.isActive && p.category === cat).length;
+            const isSelected = selectedCategory === cat;
+
+            return (
+              <Badge
+                key={cat}
+                variant={isSelected ? "default" : "outline"}
+                onClick={() => setSelectedCategory(cat)}
+                className={`cursor-pointer text-xs px-3 py-1 font-medium whitespace-nowrap transition flex items-center gap-1.5 ${
+                  isSelected
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "bg-white text-slate-700 hover:bg-slate-100 border-slate-200"
+                }`}
+              >
+                <span>{cat}</span>
+                <span
+                  className={`text-[10px] rounded-full px-1.5 py-0.2 font-mono ${
+                    isSelected
+                      ? "bg-slate-700 text-slate-200"
+                      : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {count}
+                </span>
+              </Badge>
+            );
+          })}
         </div>
 
         {/* Product Grid */}

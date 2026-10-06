@@ -24,11 +24,15 @@ import {
   Copy, 
   Send,
   Calendar,
-  Wallet
+  Wallet,
+  Printer
 } from "lucide-react";
+import { DebtReceiptModal } from "./DebtReceiptModal";
+import { sound } from "@/lib/sounds";
+import { toast } from "sonner";
 
 export function CreditView() {
-  const { customers, debtEntries, settings, addCustomer, recordDebtPayment, addManualDebt } = useStore();
+  const { customers, debtEntries, settings, currentStaff, addCustomer, recordDebtPayment, addManualDebt } = useStore();
 
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState<"ALL" | "WITH_DEBT" | "NO_DEBT">("WITH_DEBT");
@@ -41,6 +45,16 @@ export function CreditView() {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isManualDebtModalOpen, setIsManualDebtModalOpen] = useState(false);
   const [isSmsModalOpen, setIsSmsModalOpen] = useState(false);
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [lastPaymentReceipt, setLastPaymentReceipt] = useState<{
+    receiptNo: string;
+    customerName: string;
+    amountPaid: number;
+    paymentMethod: string;
+    remainingDebt: number;
+    date: string;
+    notes?: string;
+  } | null>(null);
 
   // Payment Form
   const [payAmount, setPayAmount] = useState<string>("");
@@ -112,15 +126,29 @@ export function CreditView() {
     const amt = parseFloat(payAmount) || 0;
     if (amt <= 0) return;
 
+    sound.chaChing();
     recordDebtPayment(activeCustomer.id, amt, payMethod, payNotes);
     setIsPaymentModalOpen(false);
+
+    const remaining = Math.max(0, activeCustomer.totalDebt - amt);
+    setLastPaymentReceipt({
+      receiptNo: `UTANG-ACK-${Date.now().toString().slice(-6)}`,
+      customerName: activeCustomer.name,
+      amountPaid: amt,
+      paymentMethod: payMethod,
+      remainingDebt: remaining,
+      date: new Date().toISOString(),
+      notes: payNotes,
+    });
+    setIsReceiptModalOpen(true);
+    toast.success(`₱${amt.toFixed(2)} payment recorded for ${activeCustomer.name}!`);
 
     // Refresh active customer data
     const updated = customers.find((c) => c.id === activeCustomer.id);
     if (updated) {
       setActiveCustomer({
         ...updated,
-        totalDebt: Math.max(0, updated.totalDebt - amt),
+        totalDebt: remaining,
       });
     }
   };
@@ -647,36 +675,54 @@ export function CreditView() {
             </DialogTitle>
           </DialogHeader>
 
-          {activeCustomer && (
-            <div className="space-y-4 text-xs">
-              <p className="text-slate-500">
-                Send a friendly, respectful reminder to <strong>{activeCustomer.name}</strong> ({activeCustomer.phone}):
-              </p>
+          {activeCustomer && (() => {
+            const rawPhone = activeCustomer.phone.replace(/[^0-9]/g, "");
+            const waPhone = rawPhone.startsWith("0") ? `63${rawPhone.slice(1)}` : rawPhone;
+            const messageText = generateSmsMessage(activeCustomer);
 
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-slate-800 font-sans text-xs leading-relaxed select-text">
-                &ldquo;{generateSmsMessage(activeCustomer)}&rdquo;
-              </div>
+            return (
+              <div className="space-y-4 text-xs">
+                <p className="text-slate-500">
+                  Send a respectful reminder to <strong>{activeCustomer.name}</strong> ({activeCustomer.phone}):
+                </p>
 
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => handleCopySms(activeCustomer)}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs"
-                >
-                  <Copy className="h-3.5 w-3.5 mr-1.5" />
-                  {copiedSms ? "Copied to Clipboard!" : "Copy SMS Text"}
-                </Button>
-                {activeCustomer.phone && (
-                  <a
-                    href={`sms:${activeCustomer.phone}?body=${encodeURIComponent(generateSmsMessage(activeCustomer))}`}
-                    className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 text-xs font-medium hover:bg-slate-100"
+                <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-lg text-slate-800 font-sans text-xs leading-relaxed select-text shadow-inner">
+                  &ldquo;{messageText}&rdquo;
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => handleCopySms(activeCustomer)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9"
                   >
-                    <Send className="h-3.5 w-3.5 mr-1.5" /> Open SMS App
-                  </a>
-                )}
+                    <Copy className="h-3.5 w-3.5 mr-1.5" />
+                    {copiedSms ? "Copied!" : "Copy Text"}
+                  </Button>
+                  
+                  {activeCustomer.phone && (
+                    <a
+                      href={`sms:${activeCustomer.phone}?body=${encodeURIComponent(messageText)}`}
+                      className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 h-9"
+                    >
+                      <Send className="h-3.5 w-3.5 mr-1.5 text-blue-600" /> Send SMS
+                    </a>
+                  )}
+
+                  {activeCustomer.phone && (
+                    <a
+                      href={`https://wa.me/${waPhone}?text=${encodeURIComponent(messageText)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center rounded-md border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 h-9"
+                    >
+                      WhatsApp
+                    </a>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
       )}
@@ -758,6 +804,17 @@ export function CreditView() {
           </form>
         </DialogContent>
       </Dialog>
+      )}
+
+      {/* COLLECTION ACKNOWLEDGMENT RECEIPT MODAL */}
+      {isReceiptModalOpen && lastPaymentReceipt && (
+        <DebtReceiptModal
+          isOpen={isReceiptModalOpen}
+          onClose={() => setIsReceiptModalOpen(false)}
+          settings={settings}
+          cashierName={currentStaff.name}
+          receiptData={lastPaymentReceipt}
+        />
       )}
     </div>
   );

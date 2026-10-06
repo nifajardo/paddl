@@ -1,16 +1,23 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { 
   Product, 
   Customer, 
   Expense, 
   Transaction, 
   StaffUser, 
+  UserRole,
   StoreSettings, 
   CashDrawerShift, 
   DebtEntry,
-  CartItem
+  CartItem,
+  AuditLogEntry,
+  ReturnRecord,
+  ReturnItem,
+  TransactionStatus,
+  StaffPermissions,
+  SplitPaymentDetail
 } from "@/types";
 import {
   INITIAL_PRODUCTS,
@@ -21,10 +28,13 @@ import {
   INITIAL_CASH_DRAWER,
   INITIAL_STAFF,
   INITIAL_SETTINGS,
+  INITIAL_AUDIT_LOGS,
+  INITIAL_RETURNS,
 } from "@/data/mockData";
+import { ALL_SHOP_PRESETS, ShopPreset } from "@/data/shopPresets";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
-const STORAGE_KEY = "PEDDLR_PRO_STORE_V2";
+const STORAGE_KEY = "PEDDLR_PRO_STORE_V3";
 
 interface StoreContextType {
   // State
@@ -41,6 +51,13 @@ interface StoreContextType {
   pendingSyncCount: number;
   isSyncing: boolean;
   isSupabaseActive: boolean;
+  syncStatus: "synced" | "syncing" | "offline";
+  auditLogs: AuditLogEntry[];
+  returnRecords: ReturnRecord[];
+  sessionUser: any | null;
+  isAuthLoading: boolean;
+  isAuthenticated: boolean;
+  currentShopPreset: "SARI_SARI" | "MOTOR_SHOP" | "PHARMACY" | "MILK_TEA";
 
   // Actions
   addProduct: (product: Omit<Product, "id" | "createdAt" | "updatedAt">) => Product;
@@ -60,10 +77,24 @@ interface StoreContextType {
     customerId?: string;
     customerName?: string;
     ewalletRefNumber?: string;
+    splitDetail?: SplitPaymentDetail;
     isBackdated?: boolean;
     customDate?: string;
     notes?: string;
   }) => Transaction;
+
+  voidTransaction: (params: {
+    transactionId: string;
+    reason: string;
+    notes?: string;
+  }) => { success: boolean; error?: string };
+
+  processReturn: (params: {
+    transactionId: string;
+    returnedItems: { productId: string; quantity: number }[];
+    reason: string;
+    notes?: string;
+  }) => { success: boolean; error?: string; returnRecord?: ReturnRecord };
 
   addCustomer: (customer: Omit<Customer, "id" | "createdAt" | "totalDebt">) => Customer;
   updateCustomer: (id: string, updates: Partial<Customer>) => void;
@@ -75,8 +106,35 @@ interface StoreContextType {
   closeCashDrawer: (actualCashCount: number, notes?: string) => void;
   logCashAdjustment: (amount: number, type: "IN" | "OUT", reason: string) => void;
 
-  updateSettings: (updates: Partial<StoreSettings>) => void;
+  logAuditEvent: (entry: Omit<AuditLogEntry, "id" | "createdAt">) => void;
+  
+  // Staff & Permissions
+  addStaff: (staffData: Omit<StaffUser, "id" | "createdAt">) => StaffUser;
+  updateStaff: (id: string, updates: Partial<StaffUser>) => void;
+  deleteStaff: (id: string) => void;
+  toggleStaffActive: (id: string) => void;
   switchStaff: (staffId: string) => void;
+  hasPermission: (permission: keyof StaffPermissions) => boolean;
+  verifyOwnerPin: (pin: string) => boolean;
+
+  // Settings & Theme
+  updateSettings: (updates: Partial<StoreSettings>) => void;
+  setFontSizeMode: (mode: "NORMAL" | "LARGE") => void;
+  toggleProductBestseller: (productId: string) => void;
+
+  // Auth & Session
+  loginWithPin: (staffId: string, pin: string) => { success: boolean; error?: string };
+  loginWithEmail: (email: string, pass: string) => Promise<{ error?: string }>;
+  registerStoreAccount: (email: string, pass: string, storeName?: string) => Promise<{ error?: string; success?: boolean }>;
+  logout: () => Promise<void>;
+  quickDemoLogin: (role: UserRole) => void;
+  signInWithEmail: (email: string, pass: string) => Promise<{ error?: string }>;
+  signOut: () => Promise<void>;
+
+  // Shop Presets
+  loadShopPreset: (presetKey: "SARI_SARI" | "MOTOR_SHOP" | "PHARMACY" | "MILK_TEA") => void;
+
+  // Sync & Backup
   syncCloud: () => Promise<void>;
   exportDataJson: () => string;
   importDataJson: (json: string) => boolean;
@@ -97,15 +155,45 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<StoreSettings>(INITIAL_SETTINGS);
   const [staffList, setStaffList] = useState<StaffUser[]>(INITIAL_STAFF);
   const [currentStaff, setCurrentStaff] = useState<StaffUser>(INITIAL_STAFF[2]); // Maria Santos
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(INITIAL_AUDIT_LOGS);
+  const [returnRecords, setReturnRecords] = useState<ReturnRecord[]>(INITIAL_RETURNS);
+  
   const [isOnline, setIsOnline] = useState(true);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSupabaseActive, setIsSupabaseActive] = useState(false);
+  const [sessionUser, setSessionUser] = useState<any | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [currentShopPreset, setCurrentShopPreset] = useState<"SARI_SARI" | "MOTOR_SHOP" | "PHARMACY" | "MILK_TEA">("SARI_SARI");
+
+  // Derived sync status
+  const syncStatus: "synced" | "syncing" | "offline" = !isOnline
+    ? "offline"
+    : isSyncing
+    ? "syncing"
+    : "synced";
 
   // Load Initial Data (LocalStorage + Supabase Remote Sync)
   useEffect(() => {
     // 1. Initial Local Storage Load
     try {
+      // Check auth session
+      const authSession = localStorage.getItem("PADDLR_AUTH_SESSION");
+      if (authSession) {
+        try {
+          const parsedAuth = JSON.parse(authSession);
+          if (parsedAuth && parsedAuth.authenticated) {
+            setIsAuthenticated(true);
+          }
+        } catch {}
+      }
+
+      const savedPreset = localStorage.getItem("PADDLR_CURRENT_PRESET");
+      if (savedPreset && (savedPreset === "SARI_SARI" || savedPreset === "MOTOR_SHOP" || savedPreset === "PHARMACY" || savedPreset === "MILK_TEA")) {
+        setCurrentShopPreset(savedPreset as any);
+      }
+
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
@@ -118,6 +206,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (parsed.settings) setSettings(parsed.settings);
         if (parsed.staffList) setStaffList(parsed.staffList);
         if (parsed.currentStaff) setCurrentStaff(parsed.currentStaff);
+        if (parsed.auditLogs) setAuditLogs(parsed.auditLogs);
+        if (parsed.returnRecords) setReturnRecords(parsed.returnRecords);
       }
     } catch (e) {
       console.error("Failed to load store from localStorage", e);
@@ -130,10 +220,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    // 3. Supabase Cloud Sync if configured
+    // 3. Supabase Auth & Realtime Sync if configured
+    let realtimeChannel: any = null;
+    let authSub: any = null;
+
     if (isSupabaseConfigured() && supabase) {
       const client = supabase;
       setIsSupabaseActive(true);
+
+      // Auth Session check
+      client.auth.getSession().then(({ data: { session } }) => {
+        setSessionUser(session?.user || null);
+      });
+
+      const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
+        setSessionUser(session?.user || null);
+      });
+      authSub = authListener;
+
       const syncFromSupabase = async () => {
         try {
           const [prodRes, custRes, debtRes, txnRes, expRes] = await Promise.all([
@@ -231,12 +335,43 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       };
 
       syncFromSupabase();
+
+      // Multi-device realtime listener
+      realtimeChannel = client
+        .channel("peddlr-realtime-sync")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "products" },
+          () => syncFromSupabase()
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "transactions" },
+          () => syncFromSupabase()
+        )
+        .subscribe();
     }
 
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      if (realtimeChannel && supabase) {
+        supabase.removeChannel(realtimeChannel);
+      }
+      if (authSub?.subscription) {
+        authSub.subscription.unsubscribe();
+      }
     };
+  }, []);
+
+  // Audit Logger
+  const logAuditEvent = useCallback((entry: Omit<AuditLogEntry, "id" | "createdAt">) => {
+    const newEntry: AuditLogEntry = {
+      ...entry,
+      id: `audit-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      createdAt: new Date().toISOString(),
+    };
+    setAuditLogs((prev) => [newEntry, ...prev.slice(0, 199)]);
   }, []);
 
   // Save to LocalStorage
@@ -253,6 +388,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         settings,
         staffList,
         currentStaff,
+        auditLogs,
+        returnRecords,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
     } catch (e) {
@@ -269,6 +406,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     settings,
     staffList,
     currentStaff,
+    auditLogs,
+    returnRecords,
   ]);
 
   // Product Actions
@@ -300,6 +439,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       });
     }
 
+    // Audit Log for product creation
+    logAuditEvent({
+      action: "PRODUCT_CREATED",
+      description: `Added product ${newProduct.name} (₱${newProduct.sellingPrice.toFixed(2)})`,
+      performedBy: currentStaff.name,
+      recordId: newProduct.id,
+    });
+
     return newProduct;
   };
 
@@ -310,6 +457,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       )
     );
     setPendingSyncCount((c) => c + 1);
+
+    logAuditEvent({
+      action: "PRODUCT_UPDATED",
+      description: `Updated product details for ID ${id}`,
+      performedBy: currentStaff.name,
+      recordId: id,
+    });
 
     if (supabase && isSupabaseConfigured()) {
       const dbUpdates: any = {};
@@ -334,6 +488,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setProducts((prev) => prev.filter((p) => p.id !== id));
     setPendingSyncCount((c) => c + 1);
 
+    logAuditEvent({
+      action: "SETTINGS_CHANGED",
+      description: `Removed product ID ${id}`,
+      performedBy: currentStaff.name,
+      recordId: id,
+    });
+
     if (supabase && isSupabaseConfigured()) {
       supabase.from("products").delete().eq("id", id).then(({ error }) => {
         if (error) console.error("Supabase delete product error", error);
@@ -346,6 +507,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       prev.map((p) => {
         if (p.id === id) {
           const newStock = Math.max(0, p.stock + delta);
+          logAuditEvent({
+            action: "STOCK_ADJUSTED",
+            description: `Stock adjusted for ${p.name}: ${delta > 0 ? "+" : ""}${delta} (${reason})`,
+            performedBy: currentStaff.name,
+            recordId: id,
+            previousValue: `${p.stock}`,
+            newValue: `${newStock}`,
+          });
           if (supabase && isSupabaseConfigured()) {
             supabase.from("products").update({ stock: newStock }).eq("id", id).then();
           }
@@ -370,6 +539,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     customerId?: string;
     customerName?: string;
     ewalletRefNumber?: string;
+    splitDetail?: SplitPaymentDetail;
     isBackdated?: boolean;
     customDate?: string;
     notes?: string;
@@ -400,6 +570,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       cashierName: currentStaff.name,
       status: "COMPLETED",
       ewalletRefNumber: data.ewalletRefNumber,
+      splitDetail: data.splitDetail,
       isBackdated: Boolean(data.isBackdated),
       notes: data.notes,
       createdAt: dateStr,
@@ -472,19 +643,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 3. If Cash and NOT backdated beyond today, update active drawer
+    // 3. Cash Drawer reconciliation
     if (data.paymentMethod === "CASH" && cashDrawer.status === "OPEN") {
       setCashDrawer((prev) => ({
         ...prev,
         cashSales: prev.cashSales + data.total,
         expectedCash: prev.expectedCash + data.total,
       }));
+    } else if (data.paymentMethod === "SPLIT" && data.splitDetail && cashDrawer.status === "OPEN") {
+      setCashDrawer((prev) => ({
+        ...prev,
+        cashSales: prev.cashSales + data.splitDetail!.cashAmount,
+        expectedCash: prev.expectedCash + data.splitDetail!.cashAmount,
+      }));
     }
 
     setTransactions((prev) => [newTxn, ...prev]);
     setPendingSyncCount((c) => c + 1);
 
-    // 4. Insert into Supabase transactions
+    // 4. Log Audit Event
+    logAuditEvent({
+      action: "SALE_CREATED",
+      description: `Sale ${receiptNum} completed for ₱${data.total.toFixed(2)} (${data.paymentMethod})`,
+      performedBy: currentStaff.name,
+      recordId: newTxn.id,
+      newValue: `₱${data.total.toFixed(2)}`,
+    });
+
+    // 5. Insert into Supabase transactions
     if (supabase && isSupabaseConfigured()) {
       supabase.from("transactions").insert([{
         id: newTxn.id,
@@ -511,6 +697,277 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
 
     return newTxn;
+  };
+
+  // Void Transaction (Restores inventory, reverses financial impact, marks VOIDED)
+  const voidTransaction = (params: {
+    transactionId: string;
+    reason: string;
+    notes?: string;
+  }): { success: boolean; error?: string } => {
+    const txn = transactions.find((t) => t.id === params.transactionId);
+    if (!txn) return { success: false, error: "Transaction not found." };
+    if (txn.status === "VOIDED" || txn.status === "VOID") {
+      return { success: false, error: "Transaction is already voided." };
+    }
+
+    // 1. Restore inventory stock
+    setProducts((prev) =>
+      prev.map((p) => {
+        const item = txn.items.find((i) => i.product.id === p.id);
+        if (item) {
+          const restoredStock = p.stock + item.quantity;
+          if (supabase && isSupabaseConfigured()) {
+            supabase
+              .from("products")
+              .update({ stock: restoredStock, updated_at: new Date().toISOString() })
+              .eq("id", p.id)
+              .then();
+          }
+          return { ...p, stock: restoredStock, updatedAt: new Date().toISOString() };
+        }
+        return p;
+      })
+    );
+
+    // 2. Reverse customer debt if credit/utang
+    if (txn.paymentMethod === "CREDIT_UTANG" && txn.customerId) {
+      setCustomers((prev) =>
+        prev.map((c) => {
+          if (c.id === txn.customerId) {
+            const restoredDebt = Math.max(0, c.totalDebt - txn.total);
+            if (supabase && isSupabaseConfigured()) {
+              supabase.from("customers").update({ total_debt: restoredDebt }).eq("id", c.id).then();
+            }
+            return { ...c, totalDebt: restoredDebt };
+          }
+          return c;
+        })
+      );
+
+      const debtEntry: DebtEntry = {
+        id: `debt-void-${Date.now()}`,
+        customerId: txn.customerId,
+        customerName: txn.customerName || "Customer",
+        transactionId: txn.id,
+        type: "PAYMENT_RECEIVED", // Reverses the debt increase
+        amount: txn.total,
+        balanceAfter: Math.max(0, (customers.find((c) => c.id === txn.customerId)?.totalDebt || 0) - txn.total),
+        notes: `VOIDED SALE: ${txn.receiptNumber} (${params.reason})`,
+        date: new Date().toISOString(),
+        recordedBy: currentStaff.name,
+      };
+      setDebtEntries((prev) => [debtEntry, ...prev]);
+    }
+
+    // 3. Adjust cash drawer if cash sale
+    if (txn.paymentMethod === "CASH" && cashDrawer.status === "OPEN") {
+      setCashDrawer((prev) => ({
+        ...prev,
+        cashSales: Math.max(0, prev.cashSales - txn.total),
+        expectedCash: Math.max(0, prev.expectedCash - txn.total),
+      }));
+    } else if (txn.paymentMethod === "SPLIT" && txn.splitDetail && cashDrawer.status === "OPEN") {
+      setCashDrawer((prev) => ({
+        ...prev,
+        cashSales: Math.max(0, prev.cashSales - txn.splitDetail!.cashAmount),
+        expectedCash: Math.max(0, prev.expectedCash - txn.splitDetail!.cashAmount),
+      }));
+    }
+
+    // 4. Update transaction status
+    const voidTime = new Date().toISOString();
+    setTransactions((prev) =>
+      prev.map((t) =>
+        t.id === params.transactionId
+          ? {
+              ...t,
+              status: "VOIDED",
+              voidReason: params.reason,
+              voidNotes: params.notes,
+              voidedBy: currentStaff.name,
+              voidedAt: voidTime,
+            }
+          : t
+      )
+    );
+
+    // 5. Audit Log
+    logAuditEvent({
+      action: "SALE_VOIDED",
+      description: `Transaction ${txn.receiptNumber} voided. Reason: ${params.reason}`,
+      performedBy: currentStaff.name,
+      recordId: txn.id,
+      previousValue: `Total ₱${txn.total.toFixed(2)}`,
+      newValue: "VOIDED",
+    });
+
+    if (supabase && isSupabaseConfigured()) {
+      supabase
+        .from("transactions")
+        .update({ status: "VOIDED", notes: `VOIDED: ${params.reason}` })
+        .eq("id", params.transactionId)
+        .then();
+    }
+
+    setPendingSyncCount((c) => c + 1);
+    return { success: true };
+  };
+
+  // Process Return / Refund (Item-level or entire order, updates inventory & records history)
+  const processReturn = (params: {
+    transactionId: string;
+    returnedItems: { productId: string; quantity: number }[];
+    reason: string;
+    notes?: string;
+  }): { success: boolean; error?: string; returnRecord?: ReturnRecord } => {
+    const txn = transactions.find((t) => t.id === params.transactionId);
+    if (!txn) return { success: false, error: "Transaction not found." };
+    if (txn.status === "VOIDED" || txn.status === "VOID") {
+      return { success: false, error: "Cannot return items from a voided transaction." };
+    }
+
+    // Calculate previously returned quantities for this transaction
+    const previouslyReturnedQty: Record<string, number> = {};
+    (txn.returnHistory || []).forEach((r) => {
+      r.returnedItems.forEach((ri) => {
+        previouslyReturnedQty[ri.productId] = (previouslyReturnedQty[ri.productId] || 0) + ri.quantity;
+      });
+    });
+
+    const returnItemsDetail: ReturnItem[] = [];
+    let totalRefundAmount = 0;
+
+    for (const ret of params.returnedItems) {
+      if (ret.quantity <= 0) continue;
+      const originalItem = txn.items.find((i) => i.product.id === ret.productId);
+      if (!originalItem) {
+        return { success: false, error: `Product ${ret.productId} was not part of this transaction.` };
+      }
+      const alreadyReturned = previouslyReturnedQty[ret.productId] || 0;
+      const maxReturnable = originalItem.quantity - alreadyReturned;
+      if (ret.quantity > maxReturnable) {
+        return {
+          success: false,
+          error: `Cannot return ${ret.quantity} units of ${originalItem.product.name}. Only ${maxReturnable} available to return.`,
+        };
+      }
+
+      // Proportional refund calculation
+      const effectiveItemPrice = originalItem.subtotal / originalItem.quantity;
+      const refundForThisItem = Math.round(effectiveItemPrice * ret.quantity * 100) / 100;
+      totalRefundAmount += refundForThisItem;
+
+      returnItemsDetail.push({
+        productId: ret.productId,
+        productName: originalItem.product.name,
+        quantity: ret.quantity,
+        unitPrice: originalItem.product.sellingPrice,
+        refundAmount: refundForThisItem,
+      });
+    }
+
+    if (returnItemsDetail.length === 0) {
+      return { success: false, error: "No valid items selected for return." };
+    }
+
+    // 1. Restore stock for returned items
+    setProducts((prev) =>
+      prev.map((p) => {
+        const ret = returnItemsDetail.find((ri) => ri.productId === p.id);
+        if (ret) {
+          const restoredStock = p.stock + ret.quantity;
+          if (supabase && isSupabaseConfigured()) {
+            supabase
+              .from("products")
+              .update({ stock: restoredStock, updated_at: new Date().toISOString() })
+              .eq("id", p.id)
+              .then();
+          }
+          return { ...p, stock: restoredStock, updatedAt: new Date().toISOString() };
+        }
+        return p;
+      })
+    );
+
+    // 2. Adjust Utang / Customer debt if credit
+    if (txn.paymentMethod === "CREDIT_UTANG" && txn.customerId) {
+      setCustomers((prev) =>
+        prev.map((c) => {
+          if (c.id === txn.customerId) {
+            const restoredDebt = Math.max(0, c.totalDebt - totalRefundAmount);
+            if (supabase && isSupabaseConfigured()) {
+              supabase.from("customers").update({ total_debt: restoredDebt }).eq("id", c.id).then();
+            }
+            return { ...c, totalDebt: restoredDebt };
+          }
+          return c;
+        })
+      );
+    }
+
+    // 3. Adjust Cash Drawer if cash refund
+    if (txn.paymentMethod === "CASH" && cashDrawer.status === "OPEN") {
+      setCashDrawer((prev) => ({
+        ...prev,
+        cashOut: prev.cashOut + totalRefundAmount,
+        expectedCash: Math.max(0, prev.expectedCash - totalRefundAmount),
+      }));
+    }
+
+    // 4. Create Return Record
+    const returnRecord: ReturnRecord = {
+      id: `ret-${Date.now()}`,
+      transactionId: txn.id,
+      receiptNumber: txn.receiptNumber,
+      returnedItems: returnItemsDetail,
+      totalRefundAmount,
+      reason: params.reason,
+      notes: params.notes,
+      processedBy: currentStaff.name,
+      createdAt: new Date().toISOString(),
+    };
+
+    setReturnRecords((prev) => [returnRecord, ...prev]);
+
+    // Check if fully returned
+    let allReturned = true;
+    for (const item of txn.items) {
+      const alreadyRet = previouslyReturnedQty[item.product.id] || 0;
+      const justRet = returnItemsDetail.find((ri) => ri.productId === item.product.id)?.quantity || 0;
+      if (alreadyRet + justRet < item.quantity) {
+        allReturned = false;
+        break;
+      }
+    }
+
+    const newStatus: TransactionStatus = allReturned ? "REFUNDED" : "PARTIALLY_RETURNED";
+    const newRefundedAmount = (txn.refundedAmount || 0) + totalRefundAmount;
+
+    setTransactions((prev) =>
+      prev.map((t) =>
+        t.id === params.transactionId
+          ? {
+              ...t,
+              status: newStatus,
+              refundedAmount: newRefundedAmount,
+              returnHistory: [returnRecord, ...(t.returnHistory || [])],
+            }
+          : t
+      )
+    );
+
+    // 5. Audit Log
+    logAuditEvent({
+      action: "ITEM_RETURNED",
+      description: `Returned ${returnItemsDetail.length} item(s) from ${txn.receiptNumber}. Refund: ₱${totalRefundAmount.toFixed(2)}. Reason: ${params.reason}`,
+      performedBy: currentStaff.name,
+      recordId: txn.id,
+      newValue: newStatus,
+    });
+
+    setPendingSyncCount((c) => c + 1);
+    return { success: true, returnRecord };
   };
 
   // Customer & Debt Actions
@@ -796,6 +1253,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       cashDrawer,
       settings,
       staffList,
+      auditLogs,
+      returnRecords,
       exportedAt: new Date().toISOString(),
     };
     return JSON.stringify(state, null, 2);
@@ -812,6 +1271,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (data.cashDrawer) setCashDrawer(data.cashDrawer);
       if (data.settings) setSettings(data.settings);
       if (data.staffList) setStaffList(data.staffList);
+      if (data.auditLogs) setAuditLogs(data.auditLogs);
+      if (data.returnRecords) setReturnRecords(data.returnRecords);
       return true;
     } catch {
       return false;
@@ -828,7 +1289,310 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setSettings(INITIAL_SETTINGS);
     setStaffList(INITIAL_STAFF);
     setCurrentStaff(INITIAL_STAFF[2]);
+    setAuditLogs(INITIAL_AUDIT_LOGS);
+    setReturnRecords(INITIAL_RETURNS);
     localStorage.removeItem(STORAGE_KEY);
+  };
+
+  const verifyOwnerPin = (pin: string): boolean => {
+    const ownerStaff = staffList.find((s) => s.role === "OWNER");
+    const configuredPin = settings.ownerPin || ownerStaff?.pin || "1234";
+    return pin.trim() === configuredPin.trim();
+  };
+
+  const hasPermission = (permission: keyof StaffPermissions): boolean => {
+    if (currentStaff.role === "OWNER") return true;
+    if (currentStaff.permissions && currentStaff.permissions[permission] !== undefined) {
+      return currentStaff.permissions[permission];
+    }
+    if (currentStaff.role === "MANAGER") {
+      return permission !== "canManageSettings" && permission !== "canManageUsers";
+    }
+    if (currentStaff.role === "CASHIER") {
+      return permission === "canProcessSales";
+    }
+    if (currentStaff.role === "INVENTORY_STAFF") {
+      return permission === "canManageInventory";
+    }
+    return false;
+  };
+
+  const addStaff = (staffData: Omit<StaffUser, "id" | "createdAt">): StaffUser => {
+    const newStaff: StaffUser = {
+      ...staffData,
+      id: `staff-${Date.now()}`,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    };
+    setStaffList((prev) => [...prev, newStaff]);
+    logAuditEvent({
+      action: "USER_CREATED",
+      description: `Created new staff user: ${newStaff.name} (${newStaff.role})`,
+      performedBy: currentStaff.name,
+      recordId: newStaff.id,
+    });
+    setPendingSyncCount((c) => c + 1);
+    return newStaff;
+  };
+
+  const updateStaff = (id: string, updates: Partial<StaffUser>) => {
+    setStaffList((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
+    );
+    if (currentStaff.id === id) {
+      setCurrentStaff((prev) => ({ ...prev, ...updates }));
+    }
+    logAuditEvent({
+      action: "USER_UPDATED",
+      description: `Updated staff permissions/details for ID ${id}`,
+      performedBy: currentStaff.name,
+      recordId: id,
+    });
+    setPendingSyncCount((c) => c + 1);
+  };
+
+  const deleteStaff = (id: string) => {
+    setStaffList((prev) => prev.filter((s) => s.id !== id));
+    logAuditEvent({
+      action: "SETTINGS_CHANGED",
+      description: `Removed staff user ID ${id}`,
+      performedBy: currentStaff.name,
+      recordId: id,
+    });
+    setPendingSyncCount((c) => c + 1);
+  };
+
+  const toggleStaffActive = (id: string) => {
+    setStaffList((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, isActive: !s.isActive } : s))
+    );
+    setPendingSyncCount((c) => c + 1);
+  };
+
+  const setFontSizeMode = (mode: "NORMAL" | "LARGE") => {
+    updateSettings({ fontSizeMode: mode });
+  };
+
+  // Authentication & Session Management
+  const loginWithPin = (staffId: string, pin: string) => {
+    const target = staffList.find((s) => s.id === staffId);
+    if (!target) {
+      return { success: false, error: "Staff account not found." };
+    }
+    if (!target.isActive) {
+      return { success: false, error: "This staff account is currently deactivated." };
+    }
+    if (target.pin !== pin.trim()) {
+      return { success: false, error: "Incorrect 4-digit PIN." };
+    }
+
+    setCurrentStaff(target);
+    setIsAuthenticated(true);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("PADDLR_AUTH_SESSION", JSON.stringify({
+          authenticated: true,
+          staffId: target.id,
+          staffName: target.name,
+          role: target.role,
+          timestamp: Date.now(),
+        }));
+      } catch {}
+    }
+    logAuditEvent({
+      action: "USER_LOGIN",
+      description: `Terminal PIN Login: ${target.name} (${target.role})`,
+      performedBy: target.name,
+      staffName: target.name,
+      staffRole: target.role,
+    });
+    return { success: true };
+  };
+
+  const loginWithEmail = async (email: string, pass: string): Promise<{ error?: string }> => {
+    setIsAuthLoading(true);
+    try {
+      if (supabase && isSupabaseConfigured()) {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password: pass,
+        });
+        if (error) {
+          setIsAuthLoading(false);
+          return { error: error.message };
+        }
+        if (data.user) {
+          setSessionUser(data.user);
+        }
+      }
+      const matched = staffList.find(
+        (s) => s.email.toLowerCase() === email.trim().toLowerCase()
+      );
+      const activeUser = matched || staffList.find((s) => s.role === "OWNER") || staffList[0];
+      setCurrentStaff(activeUser);
+      setIsAuthenticated(true);
+
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("PADDLR_AUTH_SESSION", JSON.stringify({
+            authenticated: true,
+            email: email.trim(),
+            staffId: activeUser.id,
+            staffName: activeUser.name,
+            role: activeUser.role,
+            timestamp: Date.now(),
+          }));
+        } catch {}
+      }
+
+      logAuditEvent({
+        action: "USER_LOGIN",
+        description: `Cloud Account Login: ${email} as ${activeUser.name} (${activeUser.role})`,
+        performedBy: activeUser.name,
+        staffName: activeUser.name,
+        staffRole: activeUser.role,
+      });
+
+      setIsAuthLoading(false);
+      return {};
+    } catch (e: any) {
+      setIsAuthLoading(false);
+      return { error: e.message || "Failed to authenticate." };
+    }
+  };
+
+  const registerStoreAccount = async (email: string, pass: string, storeName?: string): Promise<{ error?: string; success?: boolean }> => {
+    setIsAuthLoading(true);
+    try {
+      if (!supabase || !isSupabaseConfigured()) {
+        setIsAuthLoading(false);
+        return { error: "Supabase cloud client is not configured." };
+      }
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password: pass,
+        options: {
+          data: {
+            store_name: storeName || settings.storeName,
+          }
+        }
+      });
+      setIsAuthLoading(false);
+      if (error) {
+        return { error: error.message };
+      }
+      return { success: true };
+    } catch (e: any) {
+      setIsAuthLoading(false);
+      return { error: e.message || "Registration failed." };
+    }
+  };
+
+  const logout = async () => {
+    logAuditEvent({
+      action: "USER_LOGOUT",
+      description: `Staff member ${currentStaff.name} logged out / locked terminal`,
+      performedBy: currentStaff.name,
+      staffName: currentStaff.name,
+      staffRole: currentStaff.role,
+    });
+
+    if (supabase && isSupabaseConfigured()) {
+      try {
+        await supabase.auth.signOut();
+      } catch {}
+    }
+    setSessionUser(null);
+    setIsAuthenticated(false);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem("PADDLR_AUTH_SESSION");
+      } catch {}
+    }
+  };
+
+  const quickDemoLogin = (role: UserRole) => {
+    const target = staffList.find((s) => s.role === role) || staffList[0];
+    setCurrentStaff(target);
+    setIsAuthenticated(true);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("PADDLR_AUTH_SESSION", JSON.stringify({
+          authenticated: true,
+          staffId: target.id,
+          staffName: target.name,
+          role: target.role,
+          timestamp: Date.now(),
+        }));
+      } catch {}
+    }
+    logAuditEvent({
+      action: "USER_LOGIN",
+      description: `Quick Demo Login: ${target.name} (${target.role})`,
+      performedBy: target.name,
+      staffName: target.name,
+      staffRole: target.role,
+    });
+  };
+
+  const signInWithEmail = loginWithEmail;
+  const signOut = logout;
+
+  // Business Template / Preset Loader
+  const loadShopPreset = (presetKey: "SARI_SARI" | "MOTOR_SHOP" | "PHARMACY" | "MILK_TEA") => {
+    const preset = ALL_SHOP_PRESETS[presetKey];
+    if (!preset) return;
+
+    setProducts(preset.products);
+    setCustomers(preset.customers);
+    setDebtEntries(preset.debtEntries);
+    setTransactions(preset.transactions);
+    setExpenses(preset.expenses);
+    setCashDrawer(preset.cashDrawer);
+    setSettings(preset.settings);
+    setCurrentShopPreset(presetKey);
+
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("PADDLR_CURRENT_PRESET", presetKey);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          products: preset.products,
+          customers: preset.customers,
+          debtEntries: preset.debtEntries,
+          transactions: preset.transactions,
+          expenses: preset.expenses,
+          cashDrawer: preset.cashDrawer,
+          settings: preset.settings,
+          staffList,
+          currentStaff,
+          auditLogs,
+          returnRecords,
+        }));
+      } catch {}
+    }
+
+    logAuditEvent({
+      action: "PRESET_LOADED",
+      description: `Loaded Business Template: ${preset.name} (${preset.badge})`,
+      performedBy: currentStaff.name,
+      staffName: currentStaff.name,
+      staffRole: currentStaff.role,
+    });
+  };
+
+  const toggleProductBestseller = (productId: string) => {
+    setProducts((prev) => {
+      const updated = prev.map((p) =>
+        p.id === productId ? { ...p, isBestseller: !p.isBestseller } : p
+      );
+      if (typeof window !== "undefined") {
+        try {
+          const current = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, products: updated }));
+        } catch {}
+      }
+      return updated;
+    });
   };
 
   return (
@@ -847,11 +1611,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         pendingSyncCount,
         isSyncing,
         isSupabaseActive,
+        syncStatus,
+        auditLogs,
+        returnRecords,
+        sessionUser,
+        isAuthLoading,
+        isAuthenticated,
+        currentShopPreset,
+        loginWithPin,
+        loginWithEmail,
+        registerStoreAccount,
+        logout,
+        quickDemoLogin,
+        loadShopPreset,
         addProduct,
         updateProduct,
         deleteProduct,
         adjustProductStock,
         processCheckout,
+        voidTransaction,
+        processReturn,
         addCustomer,
         updateCustomer,
         recordDebtPayment,
@@ -860,8 +1639,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         openCashDrawer,
         closeCashDrawer,
         logCashAdjustment,
-        updateSettings,
+        logAuditEvent,
+        addStaff,
+        updateStaff,
+        deleteStaff,
+        toggleStaffActive,
         switchStaff,
+        hasPermission,
+        verifyOwnerPin,
+        updateSettings,
+        setFontSizeMode,
+        toggleProductBestseller,
+        signInWithEmail,
+        signOut,
         syncCloud,
         exportDataJson,
         importDataJson,

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useStore } from "@/context/StoreContext";
 import { Product, ProductCategory } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -22,31 +22,81 @@ import {
   TrendingUp, 
   RotateCw,
   PlusCircle,
-  MinusCircle
+  MinusCircle,
+  ShoppingCart,
+  Tag,
+  Calendar,
+  ShieldAlert,
+  Clock
 } from "lucide-react";
+import { RestockSheetModal } from "./RestockSheetModal";
+import { BarcodeLabelsModal } from "./BarcodeLabelsModal";
 
-const CATEGORIES: ProductCategory[] = [
-  "Beverages",
-  "Canned Goods & Instant",
-  "Snacks & Sweets",
-  "Rice & Grains",
-  "Personal Care",
-  "Household & Cleaning",
-  "Cigarettes & Alcohol",
-  "Services & E-Load",
+const EMOJI_OPTIONS = [
+  "🥫", "🥤", "🍞", "🍚", "🧴", "🧼", "🚬", "📱", 
+  "💊", "🩹", "💉", "🧪", "🩺", 
+  "🏍️", "🛢️", "🔧", "⚙️", "🪛", "⚡", 
+  "🧋", "☕", "🧇", "🍟", "🥤", 
+  "📦", "🏷️"
 ];
 
-const EMOJI_OPTIONS = ["🥫", "🍜", "🍺", "☕", "🥤", "🍚", "🥔", "🧼", "🌾", "📱", "🍪", "🧴", "🍬", "🥚", "🍞"];
-
 export function InventoryView() {
-  const { products, addProduct, updateProduct, deleteProduct, adjustProductStock } = useStore();
+  const { products, settings, addProduct, updateProduct, deleteProduct, adjustProductStock } = useStore();
 
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
-  const [stockFilter, setStockFilter] = useState<"ALL" | "LOW_STOCK" | "OUT_OF_STOCK">("ALL");
+  const [stockFilter, setStockFilter] = useState<"ALL" | "LOW_STOCK" | "OUT_OF_STOCK" | "EXPIRED" | "EXPIRING_SOON">("ALL");
+
+  // Dynamically extract categories from active product catalog
+  const availableCategories = useMemo(() => {
+    const fromProducts = Array.from(
+      new Set(
+        products
+          .map((p) => p.category)
+          .filter((cat): cat is string => Boolean(cat) && cat !== "All")
+      )
+    );
+    const standardCategories = [
+      "Beverages",
+      "Canned Goods & Instant",
+      "Snacks & Sweets",
+      "Rice & Grains",
+      "Personal Care",
+      "Household & Cleaning",
+      "Cigarettes & Alcohol",
+      "Services & E-Load",
+      "Prescription (Rx) Medicines",
+      "Over-The-Counter (OTC)",
+      "Vitamins & Supplements",
+      "First Aid & Antiseptics",
+      "Medical Devices & Supplies",
+      "Engine Oils & Fluids",
+      "Tires & Tubes",
+      "Brakes & Suspension",
+      "Electrical & Spark Plugs",
+      "Drivetrain & Belts",
+      "Mechanic Labor & Services",
+      "Rider Gear & Helmets",
+      "Milk Tea Classics",
+      "Fruit Teas & Refreshers",
+      "Coffee & Espresso",
+      "Snacks & Finger Food",
+      "Add-ons & Sinkers"
+    ];
+    return Array.from(new Set([...fromProducts, ...standardCategories]));
+  }, [products]);
+
+  // Reset selected category to "All" if filtered category does not exist in new preset
+  useEffect(() => {
+    if (selectedCategory !== "All" && !products.some((p) => p.category === selectedCategory)) {
+      setSelectedCategory("All");
+    }
+  }, [products, selectedCategory]);
 
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isRestockSheetOpen, setIsRestockSheetOpen] = useState(false);
+  const [isBarcodeLabelsOpen, setIsBarcodeLabelsOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [adjustingProduct, setAdjustingProduct] = useState<Product | null>(null);
   const [adjustDelta, setAdjustDelta] = useState<string>("");
@@ -63,6 +113,34 @@ export function InventoryView() {
   const [formUnit, setFormUnit] = useState<string>("pcs");
   const [formEmoji, setFormEmoji] = useState<string>("🥫");
 
+  // Pharmacy & Expiry Fields
+  const [formExpirationDate, setFormExpirationDate] = useState<string>("");
+  const [formBatchNumber, setFormBatchNumber] = useState<string>("");
+  const [formGenericName, setFormGenericName] = useState<string>("");
+  const [formBrandName, setFormBrandName] = useState<string>("");
+  const [formDosage, setFormDosage] = useState<string>("");
+  const [formPrescriptionRequired, setFormPrescriptionRequired] = useState<boolean>(false);
+  const [formImageUrl, setFormImageUrl] = useState<string>("");
+
+  // Expiration helper
+  const getExpirationInfo = (p: Product) => {
+    if (!p.expirationDate) return { status: "NONE" as const, label: null, daysLeft: null };
+    const exp = new Date(p.expirationDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffTime = exp.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) {
+      return { status: "EXPIRED" as const, label: `Expired (${Math.abs(diffDays)}d ago)`, daysLeft: diffDays };
+    }
+    const warningDays = settings.expirationWarningDays || 30;
+    if (diffDays <= warningDays) {
+      return { status: "EXPIRING_SOON" as const, label: `Exp: in ${diffDays}d`, daysLeft: diffDays };
+    }
+    return { status: "NORMAL" as const, label: `Exp: ${p.expirationDate}`, daysLeft: diffDays };
+  };
+
   // Calculate KPIs
   const totalSKUs = products.length;
   const totalCostValuation = products.reduce((sum, p) => sum + p.costPrice * p.stock, 0);
@@ -71,17 +149,23 @@ export function InventoryView() {
 
   const lowStockItems = products.filter((p) => p.stock > 0 && p.stock <= p.minStockAlert);
   const outOfStockItems = products.filter((p) => p.stock <= 0);
+  const expiredItems = products.filter((p) => getExpirationInfo(p).status === "EXPIRED");
+  const expiringSoonItems = products.filter((p) => getExpirationInfo(p).status === "EXPIRING_SOON");
 
   // Filtered products list
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
       const matchesSearch =
         p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.barcode.toLowerCase().includes(search.toLowerCase());
+        p.barcode.toLowerCase().includes(search.toLowerCase()) ||
+        (p.genericName && p.genericName.toLowerCase().includes(search.toLowerCase())) ||
+        (p.brandName && p.brandName.toLowerCase().includes(search.toLowerCase()));
       const matchesCat = selectedCategory === "All" || p.category === selectedCategory;
       let matchesStock = true;
       if (stockFilter === "LOW_STOCK") matchesStock = p.stock > 0 && p.stock <= p.minStockAlert;
       if (stockFilter === "OUT_OF_STOCK") matchesStock = p.stock <= 0;
+      if (stockFilter === "EXPIRED") matchesStock = getExpirationInfo(p).status === "EXPIRED";
+      if (stockFilter === "EXPIRING_SOON") matchesStock = getExpirationInfo(p).status === "EXPIRING_SOON";
       return matchesSearch && matchesCat && matchesStock;
     });
   }, [products, search, selectedCategory, stockFilter]);
@@ -97,6 +181,13 @@ export function InventoryView() {
     setFormMinStock("10");
     setFormUnit("pcs");
     setFormEmoji("🥫");
+    setFormExpirationDate("");
+    setFormBatchNumber("");
+    setFormGenericName("");
+    setFormBrandName("");
+    setFormDosage("");
+    setFormPrescriptionRequired(false);
+    setFormImageUrl("");
     setIsAddModalOpen(true);
   };
 
@@ -111,6 +202,13 @@ export function InventoryView() {
     setFormMinStock(p.minStockAlert.toString());
     setFormUnit(p.unit);
     setFormEmoji(p.emoji);
+    setFormExpirationDate(p.expirationDate || "");
+    setFormBatchNumber(p.batchNumber || "");
+    setFormGenericName(p.genericName || "");
+    setFormBrandName(p.brandName || "");
+    setFormDosage(p.dosage || "");
+    setFormPrescriptionRequired(Boolean(p.prescriptionRequired));
+    setFormImageUrl(p.imageUrl || "");
   };
 
   const handleOpenAdjust = (p: Product) => {
@@ -127,32 +225,31 @@ export function InventoryView() {
     const stock = parseInt(formStock) || 0;
     const minAlert = parseInt(formMinStock) || 10;
 
+    const payload = {
+      name: formName.trim(),
+      barcode: formBarcode.trim() || `SKU-${Date.now().toString().slice(-6)}`,
+      category: formCategory,
+      costPrice: cost,
+      sellingPrice: price,
+      stock,
+      minStockAlert: minAlert,
+      unit: formUnit.trim() || "pcs",
+      emoji: formEmoji,
+      expirationDate: formExpirationDate || undefined,
+      batchNumber: formBatchNumber.trim() || undefined,
+      genericName: formGenericName.trim() || undefined,
+      brandName: formBrandName.trim() || undefined,
+      dosage: formDosage.trim() || undefined,
+      prescriptionRequired: formPrescriptionRequired,
+      imageUrl: formImageUrl.trim() || undefined,
+      isActive: true,
+    };
+
     if (editingProduct) {
-      updateProduct(editingProduct.id, {
-        name: formName.trim(),
-        barcode: formBarcode.trim(),
-        category: formCategory,
-        costPrice: cost,
-        sellingPrice: price,
-        stock,
-        minStockAlert: minAlert,
-        unit: formUnit.trim(),
-        emoji: formEmoji,
-      });
+      updateProduct(editingProduct.id, payload);
       setEditingProduct(null);
     } else {
-      addProduct({
-        name: formName.trim(),
-        barcode: formBarcode.trim() || `SKU-${Date.now().toString().slice(-6)}`,
-        category: formCategory,
-        costPrice: cost,
-        sellingPrice: price,
-        stock,
-        minStockAlert: minAlert,
-        unit: formUnit.trim() || "pcs",
-        emoji: formEmoji,
-        isActive: true,
-      });
+      addProduct(payload);
       setIsAddModalOpen(false);
     }
   };
@@ -204,7 +301,25 @@ export function InventoryView() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap sm:flex-nowrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsBarcodeLabelsOpen(true)}
+            className="border-emerald-300 text-emerald-900 bg-emerald-50 hover:bg-emerald-100 text-xs h-9 font-semibold"
+          >
+            <Tag className="h-3.5 w-3.5 mr-1.5 text-emerald-700" />
+            Print Barcode Labels
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsRestockSheetOpen(true)}
+            className="border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100 text-xs h-9 font-semibold"
+          >
+            <ShoppingCart className="h-3.5 w-3.5 mr-1.5 text-amber-700" />
+            Wholesaler Restock Sheet {lowStockItems.length + outOfStockItems.length > 0 && `(${lowStockItems.length + outOfStockItems.length})`}
+          </Button>
           <Button variant="outline" size="sm" onClick={handleExportCSV} className="text-xs h-9">
             <Download className="h-3.5 w-3.5 mr-1.5" /> Export CSV
           </Button>
@@ -223,7 +338,7 @@ export function InventoryView() {
               <Boxes className="h-4 w-4 text-slate-400" />
             </div>
             <div className="text-xl sm:text-2xl font-bold text-slate-900 mt-1">{totalSKUs} SKUs</div>
-            <div className="text-[11px] text-slate-400 mt-0.5">Active products</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">Active retail items</div>
           </CardContent>
         </Card>
 
@@ -260,14 +375,19 @@ export function InventoryView() {
         <Card className="bg-white border-slate-200">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500">Low / Out of Stock</span>
+              <span className="text-xs font-medium text-slate-500">Alerts & Expiration</span>
               <AlertTriangle className="h-4 w-4 text-amber-500" />
             </div>
-            <div className="text-xl sm:text-2xl font-bold text-amber-700 mt-1 flex items-center gap-2">
+            <div className="text-base sm:text-lg font-bold text-amber-700 mt-1 flex flex-wrap items-center gap-1.5">
               <span>{lowStockItems.length} Low</span>
-              <span className="text-red-600 text-sm font-semibold">({outOfStockItems.length} Out)</span>
+              <span className="text-rose-600">({outOfStockItems.length} Out)</span>
+              {expiringSoonItems.length + expiredItems.length > 0 && (
+                <span className="text-rose-700 text-xs bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                  {expiredItems.length > 0 ? `${expiredItems.length} Expired` : `${expiringSoonItems.length} Near Expiry`}
+                </span>
+              )}
             </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">Needs wholesaler reorder</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">Wholesaler restock & expiry control</div>
           </CardContent>
         </Card>
       </div>
@@ -278,7 +398,7 @@ export function InventoryView() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <Input
-              placeholder="Search by product name, barcode, or SKU..."
+              placeholder="Search by product name, generic, barcode, or SKU..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 text-xs sm:text-sm bg-slate-50"
@@ -291,12 +411,14 @@ export function InventoryView() {
               onChange={(e) => setSelectedCategory(e.target.value)}
               className="h-9 px-3 text-xs rounded-md border border-slate-200 bg-slate-50 text-slate-700 focus:outline-none"
             >
-              <option value="All">All Categories</option>
-              {CATEGORIES.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
+              <option value="All">All Categories ({products.length})</option>
+              {availableCategories
+                .filter((cat) => products.some((p) => p.category === cat))
+                .map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat} ({products.filter((p) => p.category === cat).length})
+                  </option>
+                ))}
             </select>
 
             <select
@@ -305,8 +427,10 @@ export function InventoryView() {
               className="h-9 px-3 text-xs rounded-md border border-slate-200 bg-slate-50 text-slate-700 focus:outline-none"
             >
               <option value="ALL">All Stock Levels</option>
-              <option value="LOW_STOCK">Low Stock Only ({lowStockItems.length})</option>
-              <option value="OUT_OF_STOCK">Out of Stock Only ({outOfStockItems.length})</option>
+              <option value="LOW_STOCK">Low Stock ({lowStockItems.length})</option>
+              <option value="OUT_OF_STOCK">Out of Stock ({outOfStockItems.length})</option>
+              <option value="EXPIRING_SOON">Expiring in 30 Days ({expiringSoonItems.length})</option>
+              <option value="EXPIRED">Expired Items ({expiredItems.length})</option>
             </select>
           </div>
         </div>
@@ -322,7 +446,7 @@ export function InventoryView() {
                 <th className="p-3 text-right">Selling Price</th>
                 <th className="p-3 text-right">Profit / Margin</th>
                 <th className="p-3 text-center">Stock Level</th>
-                <th className="p-3 text-center">Status</th>
+                <th className="p-3 text-center">Stock & Expiry Status</th>
                 <th className="p-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -332,16 +456,38 @@ export function InventoryView() {
                 const margin = p.sellingPrice > 0 ? ((profit / p.sellingPrice) * 100).toFixed(0) : "0";
                 const isOut = p.stock <= 0;
                 const isLow = p.stock > 0 && p.stock <= p.minStockAlert;
+                const expInfo = getExpirationInfo(p);
 
                 return (
                   <tr key={p.id} className="hover:bg-slate-50/80 transition">
                     <td className="p-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl shrink-0">{p.emoji}</span>
+                      <div className="flex items-center gap-2.5">
+                        {p.imageUrl ? (
+                          <img
+                            src={p.imageUrl}
+                            alt=""
+                            className="h-10 w-10 rounded-lg object-cover border border-slate-200 shrink-0 bg-slate-50"
+                          />
+                        ) : (
+                          <span className="text-2xl shrink-0 h-10 w-10 flex items-center justify-center bg-slate-100 rounded-lg">
+                            {p.emoji}
+                          </span>
+                        )}
                         <div>
-                          <div className="font-semibold text-slate-900">{p.name}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">
-                            {p.barcode || "No Barcode"} • {p.unit || "pc"}
+                          <div className="font-semibold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                            <span>{p.name}</span>
+                            {p.prescriptionRequired && (
+                              <Badge variant="outline" className="text-[9px] px-1 py-0 border-purple-400 text-purple-700 bg-purple-50 font-bold">
+                                Rx
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 flex-wrap">
+                            <span>{p.barcode || "No Barcode"}</span>
+                            <span>• {p.unit || "pc"}</span>
+                            {p.genericName && (
+                              <span className="text-slate-500 italic">({p.genericName} {p.dosage || ""})</span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -371,19 +517,42 @@ export function InventoryView() {
                       <span className="text-[10px] text-slate-400 ml-1">{p.unit}</span>
                     </td>
 
-                    <td className="p-3 text-center">
-                      {isOut ? (
-                        <Badge variant="destructive" className="text-[10px] px-2 py-0">
-                          Out of Stock
-                        </Badge>
-                      ) : isLow ? (
-                        <Badge variant="secondary" className="text-[10px] px-2 py-0 bg-amber-100 text-amber-800">
-                          Low Stock
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="text-[10px] px-2 py-0 bg-emerald-100 text-emerald-800">
-                          In Stock
-                        </Badge>
+                    <td className="p-3 text-center space-y-1">
+                      <div>
+                        {isOut ? (
+                          <Badge variant="destructive" className="text-[10px] px-2 py-0">
+                            Out of Stock
+                          </Badge>
+                        ) : isLow ? (
+                          <Badge variant="secondary" className="text-[10px] px-2 py-0 bg-amber-100 text-amber-800">
+                            Low Stock
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px] px-2 py-0 bg-emerald-100 text-emerald-800">
+                            In Stock
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Expiration badge */}
+                      {expInfo.status === "EXPIRED" && (
+                        <div>
+                          <Badge variant="destructive" className="text-[9px] px-1.5 py-0 font-bold bg-rose-600">
+                            {expInfo.label}
+                          </Badge>
+                        </div>
+                      )}
+                      {expInfo.status === "EXPIRING_SOON" && (
+                        <div>
+                          <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-semibold bg-amber-100 text-amber-900 border border-amber-300">
+                            {expInfo.label}
+                          </Badge>
+                        </div>
+                      )}
+                      {expInfo.status === "NORMAL" && (
+                        <div className="text-[9px] text-slate-400 font-mono">
+                          {expInfo.label}
+                        </div>
                       )}
                     </td>
 
@@ -489,7 +658,7 @@ export function InventoryView() {
                   onChange={(e) => setFormCategory(e.target.value as any)}
                   className="w-full h-9 px-2 text-xs rounded-md border border-slate-200 bg-white"
                 >
-                  {CATEGORIES.map((cat) => (
+                  {availableCategories.map((cat) => (
                     <option key={cat} value={cat}>
                       {cat}
                     </option>
@@ -587,6 +756,92 @@ export function InventoryView() {
                   value={formUnit}
                   onChange={(e) => setFormUnit(e.target.value)}
                   className="text-xs h-9"
+                />
+              </div>
+            </div>
+
+            {/* Pharmacy & Expiration Tracking (Philippine FDA / DOH Compliant) */}
+            <div className="p-3 bg-purple-50/60 rounded-lg border border-purple-200 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-purple-900 text-xs flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5 text-purple-600" />
+                  Expiry & Pharmacy Specifications (Optional)
+                </span>
+                <label className="flex items-center gap-1.5 text-[11px] text-purple-800 cursor-pointer font-medium">
+                  <input
+                    type="checkbox"
+                    checked={formPrescriptionRequired}
+                    onChange={(e) => setFormPrescriptionRequired(e.target.checked)}
+                    className="rounded text-purple-600 h-3.5 w-3.5"
+                  />
+                  <span>Requires Doctor's Rx</span>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label htmlFor="prod-expiry" className="text-[11px] text-slate-600">Expiration Date</Label>
+                  <Input
+                    id="prod-expiry"
+                    type="date"
+                    value={formExpirationDate}
+                    onChange={(e) => setFormExpirationDate(e.target.value)}
+                    className="text-xs h-8 bg-white"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="prod-batch" className="text-[11px] text-slate-600">Batch / Lot No.</Label>
+                  <Input
+                    id="prod-batch"
+                    placeholder="e.g. BATCH-2026A"
+                    value={formBatchNumber}
+                    onChange={(e) => setFormBatchNumber(e.target.value)}
+                    className="text-xs h-8 bg-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <Label htmlFor="prod-generic" className="text-[11px] text-slate-600">Generic Name</Label>
+                  <Input
+                    id="prod-generic"
+                    placeholder="e.g. Paracetamol"
+                    value={formGenericName}
+                    onChange={(e) => setFormGenericName(e.target.value)}
+                    className="text-xs h-8 bg-white"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="prod-brand" className="text-[11px] text-slate-600">Brand Name</Label>
+                  <Input
+                    id="prod-brand"
+                    placeholder="e.g. Biogesic"
+                    value={formBrandName}
+                    onChange={(e) => setFormBrandName(e.target.value)}
+                    className="text-xs h-8 bg-white"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="prod-dosage" className="text-[11px] text-slate-600">Dosage / Form</Label>
+                  <Input
+                    id="prod-dosage"
+                    placeholder="e.g. 500mg Tab"
+                    value={formDosage}
+                    onChange={(e) => setFormDosage(e.target.value)}
+                    className="text-xs h-8 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="prod-image" className="text-[11px] text-slate-600">Product Image URL (Optional)</Label>
+                <Input
+                  id="prod-image"
+                  placeholder="https://... (Leave empty to display emoji icon)"
+                  value={formImageUrl}
+                  onChange={(e) => setFormImageUrl(e.target.value)}
+                  className="text-xs h-8 bg-white font-mono"
                 />
               </div>
             </div>
@@ -702,6 +957,24 @@ export function InventoryView() {
           )}
         </DialogContent>
       </Dialog>
+      )}
+
+      {/* WHOLESALER RESTOCK SHOPPING SHEET MODAL */}
+      {isRestockSheetOpen && (
+        <RestockSheetModal
+          isOpen={isRestockSheetOpen}
+          onClose={() => setIsRestockSheetOpen(false)}
+          products={products}
+          storeName={settings.storeName}
+        />
+      )}
+
+      {/* BARCODE SHELF LABELS MODAL */}
+      {isBarcodeLabelsOpen && (
+        <BarcodeLabelsModal
+          isOpen={isBarcodeLabelsOpen}
+          onClose={() => setIsBarcodeLabelsOpen(false)}
+        />
       )}
     </div>
   );

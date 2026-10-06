@@ -32,7 +32,9 @@ export function QADemoHelper({ onNavigateTab }: QADemoHelperProps) {
     processCheckout, 
     recordDebtPayment, 
     addExpense,
-    openCashDrawer
+    openCashDrawer,
+    loadShopPreset,
+    currentShopPreset
   } = useStore();
 
   // Scenario 1: Simulate Quick Cash Sale (2 Sari-Sari items)
@@ -177,6 +179,81 @@ export function QADemoHelper({ onNavigateTab }: QADemoHelperProps) {
             >
               <X className="h-4 w-4" />
             </button>
+          </div>
+
+          <div className="space-y-1.5 p-2 rounded-xl bg-slate-900 border border-slate-750">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block">
+              Switch Business Test Template:
+            </span>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  loadShopPreset("SARI_SARI");
+                  sound.chaChing();
+                  toast.success("Loaded Sari-Sari Store dataset");
+                }}
+                className={`px-2 py-1.5 rounded-lg text-left text-[11px] font-semibold border flex items-center gap-1.5 transition ${
+                  currentShopPreset === "SARI_SARI"
+                    ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
+                    : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750"
+                }`}
+              >
+                <span>🏪</span>
+                <span className="truncate">Sari-Sari Store</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  loadShopPreset("MOTOR_SHOP");
+                  sound.chaChing();
+                  toast.success("Loaded Motor Parts Shop dataset");
+                }}
+                className={`px-2 py-1.5 rounded-lg text-left text-[11px] font-semibold border flex items-center gap-1.5 transition ${
+                  currentShopPreset === "MOTOR_SHOP"
+                    ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
+                    : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750"
+                }`}
+              >
+                <span>🏍️</span>
+                <span className="truncate">Motor Parts Shop</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  loadShopPreset("PHARMACY");
+                  sound.chaChing();
+                  toast.success("Loaded Pharmacy / Botika dataset");
+                }}
+                className={`px-2 py-1.5 rounded-lg text-left text-[11px] font-semibold border flex items-center gap-1.5 transition ${
+                  currentShopPreset === "PHARMACY"
+                    ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
+                    : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750"
+                }`}
+              >
+                <span>💊</span>
+                <span className="truncate">Pharmacy / Botika</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  loadShopPreset("MILK_TEA");
+                  sound.chaChing();
+                  toast.success("Loaded Milk Tea & Cafe dataset");
+                }}
+                className={`px-2 py-1.5 rounded-lg text-left text-[11px] font-semibold border flex items-center gap-1.5 transition ${
+                  currentShopPreset === "MILK_TEA"
+                    ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
+                    : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750"
+                }`}
+              >
+                <span>🧋</span>
+                <span className="truncate">Milk Tea &amp; Cafe</span>
+              </button>
+            </div>
           </div>
 
           <p className="text-[11px] text-slate-300">

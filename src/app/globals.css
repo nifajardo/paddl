@@ -8,7 +8,7 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -122,11 +122,28 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.012em;
   }
   html {
     @apply font-sans;
+    -webkit-font-smoothing: antialiased;
   }
+  h1, h2, h3, h4, h5, h6 {
+    letter-spacing: -0.025em;
+  }
+}
+
+/* Dedicated Receipt Isolation: Preserves thermal receipt styling and prevents UI font changes from altering receipts */
+.print-receipt,
+.print-receipt *,
+#printable-receipt,
+#printable-receipt * {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+  letter-spacing: normal !important;
 }
 
 /* Fix Base UI modal backdrop blocking clicks when closed */
@@ -144,21 +161,52 @@
 }
 
 @media print {
+  @page {
+    size: auto;
+    margin: 2mm;
+  }
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
   body * {
-    visibility: hidden;
+    visibility: hidden !important;
   }
   .print-receipt, .print-receipt * {
-    visibility: visible;
+    visibility: visible !important;
   }
   .print-receipt {
-    position: fixed;
-    left: 0;
-    top: 0;
-    width: 58mm !important;
-    max-width: 58mm !important;
-    margin: 0 !important;
-    padding: 3mm !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 4mm !important;
     border: none !important;
     box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    display: block !important;
+    overflow: visible !important;
   }
+}
+
+/* Accessible Large Font Mode */
+.font-mode-large {
+  font-size: 1.08rem;
+}
+.font-mode-large .text-xs {
+  font-size: 0.85rem !important;
+}
+.font-mode-large .text-sm {
+  font-size: 0.98rem !important;
+}
+.font-mode-large .text-base {
+  font-size: 1.15rem !important;
+}
+.font-mode-large button {
+  min-height: 2.5rem;
 }
