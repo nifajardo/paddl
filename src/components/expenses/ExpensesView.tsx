@@ -1,4 +1,5 @@
 "use client";
+import { toast } from "sonner";
 
 import React, { useState, useMemo } from "react";
 import { useStore } from "@/context/StoreContext";
@@ -85,6 +86,7 @@ export function ExpensesView() {
 
   const handleSaveExpense = (e: React.FormEvent) => {
     e.preventDefault();
+    try {
     const amt = parseFloat(expAmount) || 0;
     if (amt <= 0 || !expDesc.trim()) return;
 
@@ -100,6 +102,7 @@ export function ExpensesView() {
     setExpAmount("");
     setExpDesc("");
     setExpReceipt("");
+    } catch (error) { toast.error((error as Error).message); }
   };
 
   const handleSaveDrawerShift = (e: React.FormEvent) => {

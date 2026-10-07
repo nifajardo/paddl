@@ -40,7 +40,7 @@ ${settings.tagline}
 ${settings.address}
 Tel: ${settings.phone}
 ${settings.tinNumber ? `TIN: ${settings.tinNumber}\n` : ""}================================
-${isCopy ? "*** DUPLICATE COPY / REPRINT ***\n" : ""}Official Receipt: ${transaction.receiptNumber}
+${isCopy ? "*** DUPLICATE COPY / REPRINT ***\n" : ""}Acknowledgment Receipt: ${transaction.receiptNumber}
 Status: ${transaction.status}
 Date: ${new Date(transaction.createdAt).toLocaleString("en-PH")}
 Cashier: ${transaction.cashierName}
@@ -59,7 +59,7 @@ Subtotal:       ₱${transaction.subtotal.toFixed(2)}
 ${
   transaction.discountAmount > 0
     ? `Discount:       -₱${transaction.discountAmount.toFixed(2)} (${
-        transaction.discountType === "SENIOR_PWD_20" ? "Senior/PWD 20%" : "Promo"
+        transaction.discountType === "SENIOR_PWD_20" ? "20% demo discount" : "Promo"
       })\n`
     : ""
 }${
@@ -172,7 +172,7 @@ ${settings.receiptFooterMessage}
           {/* Metadata */}
           <div className="space-y-1 mb-3 text-[11px] border-b border-slate-200 pb-2">
             <div className="flex justify-between">
-              <span className="text-slate-500">OR Number:</span>
+              <span className="text-slate-500">Receipt number:</span>
               <span className="font-semibold font-mono">{transaction.receiptNumber}</span>
             </div>
             <div className="flex justify-between">
@@ -230,7 +230,7 @@ ${settings.receiptFooterMessage}
             {transaction.discountAmount > 0 && (
               <div className="flex justify-between text-emerald-600 font-medium">
                 <span>
-                  Discount ({transaction.discountType === "SENIOR_PWD_20" ? "Senior/PWD 20%" : "Promo"}):
+                  Discount ({transaction.discountType === "SENIOR_PWD_20" ? "20% demo discount" : "Promo"}):
                 </span>
                 <span className="font-mono">-₱{transaction.discountAmount.toFixed(2)}</span>
               </div>

@@ -17,15 +17,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Paddl+ Pro - Next-Gen Cloud POS & MSME Bookkeeping",
+  title: "Paddl — Your everyday business workspace",
   description:
-    "Production-grade POS, inventory, debt book, and expense ledger built for Philippine MSMEs and retail stores.",
+    "Sales, stock, customers, and cash in one workspace for Filipino small businesses. Explore four industry demos.",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
 };
 
 export default function RootLayout({

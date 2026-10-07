@@ -27,13 +27,14 @@ import { ReceiptModal } from "./ReceiptModal";
 import { BarcodeScannerModal } from "./BarcodeScannerModal";
 import { sound } from "@/lib/sounds";
 import { toast } from "sonner";
+import { businessDate } from "@/lib/commerce";
 
 export function POSView() {
-  const { products, customers, settings, processCheckout } = useStore();
+  const { products, customers, settings, processCheckout, cart, setCart, heldCarts, holdCart, resumeCart } = useStore();
 
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [holdName, setHoldName] = useState("");
 
   // Dynamically derive categories from active products
   const categories = useMemo(() => {
@@ -63,6 +64,10 @@ export function POSView() {
 
   // Cart operations
   const addToCart = (product: Product) => {
+    if (!product.isActive || (product.expirationDate && product.expirationDate < businessDate())) {
+      toast.error("This product is inactive or expired and cannot be sold.");
+      return;
+    }
     if (product.stock <= 0) {
       toast.error(`Out of stock: ${product.name}`);
       return;
@@ -162,7 +167,7 @@ export function POSView() {
         if (barcodeBuffer.length >= 3) {
           const scannedCode = barcodeBuffer.trim();
           const matched = products.find(
-            (p) => p.barcode === scannedCode || p.barcode.endsWith(scannedCode)
+            (p) => p.isActive && p.barcode === scannedCode
           );
           if (matched) {
             addToCart(matched);
@@ -187,7 +192,9 @@ export function POSView() {
       if (!p.isActive) return false;
       const matchesSearch =
         p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.barcode.toLowerCase().includes(search.toLowerCase());
+        p.barcode.toLowerCase().includes(search.toLowerCase()) ||
+        (p.genericName || "").toLowerCase().includes(search.toLowerCase()) ||
+        (p.brandName || "").toLowerCase().includes(search.toLowerCase());
       const matchesCategory =
         selectedCategory === "All" || p.category === selectedCategory;
       return matchesSearch && matchesCategory;
@@ -204,13 +211,15 @@ export function POSView() {
 
   // Handle successful checkout
   const handleCheckoutComplete = (checkoutData: any) => {
-    sound.chaChing();
+    try {
     const txn = processCheckout(checkoutData);
+    sound.chaChing();
     setLastTransaction(txn);
     setIsCheckoutOpen(false);
     setIsReceiptOpen(true);
     setCart([]);
     toast.success("Checkout completed successfully! Receipt generated.", { duration: 3000 });
+    } catch (error) { toast.error((error as Error).message); }
   };
 
   const CartContent = () => (
@@ -236,6 +245,11 @@ export function POSView() {
       </div>
 
       {/* Cart List */}
+      <div className="py-3 border-b space-y-2">
+        {cart.length > 0 && <div className="flex gap-2"><input aria-label="Held order name" className="field-input min-w-0" placeholder="Order name (optional)" value={holdName} onChange={e => setHoldName(e.target.value)} /><button className="secondary-button shrink-0" onClick={() => { holdCart(holdName); setHoldName(""); }}>Hold order</button></div>}
+        {heldCarts.length > 0 && <select aria-label="Resume held order" className="field-input" value="" onChange={e => resumeCart(e.target.value)}><option value="">Resume a held order ({heldCarts.length})</option>{heldCarts.map(h => <option key={h.id} value={h.id}>{h.name} · {h.items.length} items</option>)}</select>}
+        <p className="text-[10px] text-slate-400">Your cart is saved when you leave this screen.</p>
+      </div>
       <div className="flex-1 overflow-y-auto py-3 space-y-2 pr-1">
         {cart.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-slate-400">
@@ -281,6 +295,7 @@ export function POSView() {
                     variant="outline"
                     size="icon"
                     className="h-6 w-6 rounded-md bg-white"
+                    aria-label={"Decrease " + item.product.name}
                     onClick={() => updateQuantity(item.product.id, -1)}
                   >
                     <Minus className="h-3 w-3" />
@@ -293,6 +308,7 @@ export function POSView() {
                     size="icon"
                     className="h-6 w-6 rounded-md bg-white"
                     disabled={item.quantity >= item.product.stock}
+                    aria-label={"Increase " + item.product.name}
                     onClick={() => updateQuantity(item.product.id, 1)}
                   >
                     <Plus className="h-3 w-3" />
@@ -380,7 +396,7 @@ export function POSView() {
                     <SheetHeader className="pb-2">
                       <SheetTitle className="text-base font-bold">Register Order</SheetTitle>
                     </SheetHeader>
-                    <CartContent />
+                    {CartContent()}
                   </SheetContent>
                 )}
               </Sheet>
@@ -459,6 +475,11 @@ export function POSView() {
               return (
                 <Card
                   key={product.id}
+                  role="button"
+                  tabIndex={isOutOfStock ? -1 : 0}
+                  aria-label={"Add " + product.name}
+                  aria-disabled={isOutOfStock}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); addToCart(product); } }}
                   onClick={() => addToCart(product)}
                   className={`relative select-none cursor-pointer transition-all border border-slate-200/80 bg-white hover:shadow-md hover:border-emerald-500 overflow-hidden flex flex-col justify-between ${
                     isOutOfStock ? "opacity-50 pointer-events-none" : ""
@@ -525,7 +546,7 @@ export function POSView() {
 
       {/* Desktop Persistent Cart Sidebar */}
       <div className="hidden lg:flex flex-col w-80 xl:w-96 bg-white p-4 border-l border-slate-200 shadow-sm shrink-0">
-        <CartContent />
+        {CartContent()}
       </div>
 
       {/* Modals */}

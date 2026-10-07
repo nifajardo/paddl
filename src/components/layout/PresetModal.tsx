@@ -35,10 +35,10 @@ export function PresetModal({ isOpen, onClose }: PresetModalProps) {
             </div>
             <div>
               <DialogTitle className="text-base font-bold text-white">
-                Switch Business Test Dataset
+                Explore industry workspaces
               </DialogTitle>
               <p className="text-xs text-slate-400">
-                Load realistic inventory, barcodes, customer debts, and transactions for various MSME shops.
+                Each industry keeps its own saved products, sales, customers, and held orders. Switch freely; your work stays here.
               </p>
             </div>
           </div>
@@ -66,7 +66,7 @@ export function PresetModal({ isOpen, onClose }: PresetModalProps) {
                     </Badge>
                   ) : (
                     <Badge variant="outline" className="border-slate-700 text-slate-400 text-[10px]">
-                      Load
+                      Open
                     </Badge>
                   )}
                 </div>

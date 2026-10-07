@@ -127,7 +127,7 @@ export function CreditView() {
     if (amt <= 0) return;
 
     sound.chaChing();
-    recordDebtPayment(activeCustomer.id, amt, payMethod, payNotes);
+    try { recordDebtPayment(activeCustomer.id, amt, payMethod, payNotes); } catch (error) { toast.error((error as Error).message); return; }
     setIsPaymentModalOpen(false);
 
     const remaining = Math.max(0, activeCustomer.totalDebt - amt);
@@ -159,7 +159,7 @@ export function CreditView() {
     const amt = parseFloat(debtAmount) || 0;
     if (amt <= 0) return;
 
-    addManualDebt(activeCustomer.id, amt, debtNotes);
+    try { addManualDebt(activeCustomer.id, amt, debtNotes); } catch (error) { toast.error((error as Error).message); return; }
     setIsManualDebtModalOpen(false);
 
     const updated = customers.find((c) => c.id === activeCustomer.id);
@@ -173,6 +173,7 @@ export function CreditView() {
 
   const handleSaveNewCustomer = (e: React.FormEvent) => {
     e.preventDefault();
+    try {
     if (!newName.trim()) return;
 
     const created = addCustomer({
@@ -185,6 +186,7 @@ export function CreditView() {
 
     setIsAddCustomerOpen(false);
     setActiveCustomer(created);
+    } catch (error) { toast.error((error as Error).message); }
   };
 
   // SMS Generator template
@@ -476,7 +478,7 @@ export function CreditView() {
                         <div>
                           <div className="flex items-center gap-1.5 font-bold">
                             <span className={isIncrease ? "text-amber-800" : "text-emerald-800"}>
-                              {isIncrease ? "Utang Incurred" : "Payment Received"}
+                              {isIncrease ? "Utang Incurred" : entry.type === "DEBT_ADJUSTMENT" ? "Sale reversal" : "Payment Received"}
                             </span>
                             <span className="text-[10px] text-slate-400 font-normal">
                               ({new Date(entry.date).toLocaleDateString("en-PH")})

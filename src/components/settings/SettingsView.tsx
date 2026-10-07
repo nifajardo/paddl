@@ -1,4 +1,5 @@
 "use client";
+import { toast } from "sonner";
 
 import React, { useState } from "react";
 import { useStore } from "@/context/StoreContext";
@@ -140,6 +141,7 @@ export function SettingsView() {
 
   const handleAddStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    try {
     if (!newStaffName.trim() || !newStaffEmail.trim()) return;
 
     addStaff({
@@ -163,6 +165,7 @@ export function SettingsView() {
     setNewStaffRole("CASHIER");
     setNewStaffPin("1234");
     setIsAddStaffOpen(false);
+    } catch (error) { toast.error((error as Error).message); }
   };
 
   const handleToggleStaffPermission = (staffId: string, permKey: string) => {
@@ -182,97 +185,6 @@ export function SettingsView() {
         [permKey]: !(currentPerms as any)[permKey],
       },
     });
-  };
-
-  const handleCopySqlScript = () => {
-    const sqlScript = `-- Peddlr Plus: Supabase Table Creation Script
-CREATE TABLE IF NOT EXISTS products (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    barcode TEXT UNIQUE,
-    category TEXT NOT NULL,
-    cost_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-    selling_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-    stock INTEGER NOT NULL DEFAULT 0,
-    min_stock_alert INTEGER NOT NULL DEFAULT 10,
-    unit TEXT NOT NULL DEFAULT 'pcs',
-    emoji TEXT NOT NULL DEFAULT '🥫',
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS customers (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    phone TEXT,
-    address TEXT,
-    credit_limit NUMERIC(12, 2) NOT NULL DEFAULT 2000.00,
-    total_debt NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-    notes TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS debt_entries (
-    id TEXT PRIMARY KEY,
-    customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-    customer_name TEXT NOT NULL,
-    transaction_id TEXT,
-    type TEXT NOT NULL,
-    amount NUMERIC(12, 2) NOT NULL,
-    balance_after NUMERIC(12, 2) NOT NULL,
-    notes TEXT,
-    date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    recorded_by TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS transactions (
-    id TEXT PRIMARY KEY,
-    receipt_number TEXT NOT NULL UNIQUE,
-    items JSONB NOT NULL,
-    subtotal NUMERIC(12, 2) NOT NULL,
-    discount_type TEXT NOT NULL DEFAULT 'NONE',
-    discount_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-    total NUMERIC(12, 2) NOT NULL,
-    payment_method TEXT NOT NULL,
-    amount_tendered NUMERIC(12, 2) NOT NULL,
-    change_due NUMERIC(12, 2) NOT NULL,
-    customer_id TEXT,
-    customer_name TEXT,
-    cashier_name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'COMPLETED',
-    ewallet_ref_number TEXT,
-    is_backdated BOOLEAN NOT NULL DEFAULT FALSE,
-    notes TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS expenses (
-    id TEXT PRIMARY KEY,
-    category TEXT NOT NULL,
-    amount NUMERIC(12, 2) NOT NULL,
-    description TEXT NOT NULL,
-    date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    payment_method TEXT NOT NULL DEFAULT 'CASH',
-    receipt_ref TEXT,
-    recorded_by TEXT NOT NULL
-);
-
-ALTER TABLE products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE debt_entries ENABLE ROW LEVEL SECURITY;
-ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Allow all on products" ON products FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all on customers" ON customers FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all on debt_entries" ON debt_entries FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all on transactions" ON transactions FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all on expenses" ON expenses FOR ALL USING (true) WITH CHECK (true);
-`;
-    navigator.clipboard.writeText(sqlScript);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2500);
   };
 
   const handleExport = () => {
@@ -303,74 +215,16 @@ CREATE POLICY "Allow all on expenses" ON expenses FOR ALL USING (true) WITH CHEC
       <div>
         <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
           <Settings className="h-6 w-6 text-slate-700" />
-          Store Settings & Database Configuration
+          Store settings
         </h1>
         <p className="text-xs sm:text-sm text-slate-500">
-          Configure store receipt details, multi-user role access, and Supabase cloud database
+          Manage your store profile, local staff access, and preferences.
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Store Profile Form */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Supabase Status Banner */}
-          <Card className={`border-2 ${isSupabaseActive ? "bg-emerald-50/50 border-emerald-400" : "bg-blue-50/50 border-blue-300"}`}>
-            <CardContent className="p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Server className={`h-5 w-5 ${isSupabaseActive ? "text-emerald-700" : "text-blue-700"}`} />
-                  <h3 className="font-bold text-sm text-slate-900">
-                    Database Engine: {isSupabaseActive ? "Supabase Cloud PostgreSQL Active" : "Local Store Ready (Hybrid Fallback)"}
-                  </h3>
-                </div>
-                <Badge className={isSupabaseActive ? "bg-emerald-600 text-white" : "bg-blue-600 text-white"}>
-                  {isSupabaseActive ? "🟢 Connected" : "Local Mode (Testing)"}
-                </Badge>
-              </div>
-
-              <p className="text-xs text-slate-600 leading-relaxed">
-                {isSupabaseActive
-                  ? "Your app is connected live to your Supabase PostgreSQL database. Changes to inventory, sales, utang, and expenses sync seamlessly across all connected cashiers and devices."
-                  : "Currently operating in Local Storage mode with realistic Philippine store demo data. To connect your live Supabase cloud database, simply add your credentials to .env.local or Vercel environment variables."}
-              </p>
-
-              <div className="bg-white p-3 rounded-lg border border-slate-200 text-xs space-y-2">
-                <div className="font-semibold text-slate-800">Quick 2-Step Supabase Setup:</div>
-                <ol className="list-decimal list-inside space-y-1 text-slate-600 text-[11px]">
-                  <li>
-                    Run the SQL Schema in your{" "}
-                    <a
-                      href="https://supabase.com/dashboard"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 hover:underline inline-flex items-center gap-0.5"
-                    >
-                      Supabase SQL Editor <ExternalLink className="h-3 w-3 inline" />
-                    </a>
-                  </li>
-                  <li>
-                    Add <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-800">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
-                    <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-800">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to your{" "}
-                    <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-800">.env.local</code>
-                  </li>
-                </ol>
-
-                <div className="pt-1 flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={handleCopySqlScript}
-                    className="text-xs bg-slate-50 border-slate-300"
-                  >
-                    <Copy className="h-3 w-3 mr-1" />
-                    {copiedSql ? "Copied SQL Script!" : "Copy Supabase SQL Script"}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Store Profile Card */}
           <Card className="bg-white border-slate-200">
             <CardContent className="p-5">

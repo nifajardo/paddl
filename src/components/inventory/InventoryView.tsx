@@ -1,4 +1,5 @@
 "use client";
+import { toast } from "sonner";
 
 import React, { useState, useMemo, useEffect } from "react";
 import { useStore } from "@/context/StoreContext";
@@ -220,6 +221,7 @@ export function InventoryView() {
   // Form Submits
   const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
+    try {
     const cost = parseFloat(formCostPrice) || 0;
     const price = parseFloat(formSellingPrice) || 0;
     const stock = parseInt(formStock) || 0;
@@ -252,14 +254,17 @@ export function InventoryView() {
       addProduct(payload);
       setIsAddModalOpen(false);
     }
+    } catch (error) { toast.error((error as Error).message); }
   };
 
   const handleSaveAdjust = (e: React.FormEvent) => {
     e.preventDefault();
+    try {
     if (!adjustingProduct) return;
     const delta = parseInt(adjustDelta) || 0;
     adjustProductStock(adjustingProduct.id, delta, adjustReason);
     setAdjustingProduct(null);
+    } catch (error) { toast.error((error as Error).message); }
   };
 
   const handleExportCSV = () => {

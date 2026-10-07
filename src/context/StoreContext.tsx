@@ -1,1672 +1,287 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { 
-  Product, 
-  Customer, 
-  Expense, 
-  Transaction, 
-  StaffUser, 
-  UserRole,
-  StoreSettings, 
-  CashDrawerShift, 
-  DebtEntry,
-  CartItem,
-  AuditLogEntry,
-  ReturnRecord,
-  ReturnItem,
-  TransactionStatus,
-  StaffPermissions,
-  SplitPaymentDetail
-} from "@/types";
-import {
-  INITIAL_PRODUCTS,
-  INITIAL_CUSTOMERS,
-  INITIAL_DEBT_ENTRIES,
-  INITIAL_EXPENSES,
-  INITIAL_TRANSACTIONS,
-  INITIAL_CASH_DRAWER,
-  INITIAL_STAFF,
-  INITIAL_SETTINGS,
-  INITIAL_AUDIT_LOGS,
-  INITIAL_RETURNS,
-} from "@/data/mockData";
-import { ALL_SHOP_PRESETS, ShopPreset } from "@/data/shopPresets";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import type { User } from "@supabase/supabase-js";
+import type { Product, Customer, Expense, Transaction, StaffUser, UserRole, StoreSettings, CashDrawerShift, DebtEntry, AuditLogEntry, ReturnRecord, StaffPermissions, CartItem } from "@/types";
+import { INITIAL_STAFF } from "@/data/mockData";
+import { ALL_SHOP_PRESETS, type ShopPreset } from "@/data/shopPresets";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { assert, nonnegative, positive, validateProduct, validateCheckout, calculateReturn, money, businessDate, type CheckoutInput } from "@/lib/commerce";
+import { toast } from "sonner";
 
-const STORAGE_KEY = "PEDDLR_PRO_STORE_V3";
-
-interface StoreContextType {
-  // State
-  products: Product[];
-  customers: Customer[];
-  debtEntries: DebtEntry[];
-  transactions: Transaction[];
-  expenses: Expense[];
-  cashDrawer: CashDrawerShift;
-  settings: StoreSettings;
-  staffList: StaffUser[];
-  currentStaff: StaffUser;
-  isOnline: boolean;
-  pendingSyncCount: number;
-  isSyncing: boolean;
-  isSupabaseActive: boolean;
-  syncStatus: "synced" | "syncing" | "offline";
-  auditLogs: AuditLogEntry[];
-  returnRecords: ReturnRecord[];
-  sessionUser: any | null;
-  isAuthLoading: boolean;
-  isAuthenticated: boolean;
-  currentShopPreset: "SARI_SARI" | "MOTOR_SHOP" | "PHARMACY" | "MILK_TEA";
-
-  // Actions
-  addProduct: (product: Omit<Product, "id" | "createdAt" | "updatedAt">) => Product;
-  updateProduct: (id: string, updates: Partial<Product>) => void;
-  deleteProduct: (id: string) => void;
-  adjustProductStock: (id: string, delta: number, reason: string) => void;
-
-  processCheckout: (data: {
-    items: CartItem[];
-    subtotal: number;
-    discountType?: "NONE" | "SENIOR_PWD_20" | "CUSTOM";
-    discountAmount: number;
-    total: number;
-    paymentMethod: Transaction["paymentMethod"];
-    amountTendered: number;
-    changeDue: number;
-    customerId?: string;
-    customerName?: string;
-    ewalletRefNumber?: string;
-    splitDetail?: SplitPaymentDetail;
-    isBackdated?: boolean;
-    customDate?: string;
-    notes?: string;
-  }) => Transaction;
-
-  voidTransaction: (params: {
-    transactionId: string;
-    reason: string;
-    notes?: string;
-  }) => { success: boolean; error?: string };
-
-  processReturn: (params: {
-    transactionId: string;
-    returnedItems: { productId: string; quantity: number }[];
-    reason: string;
-    notes?: string;
-  }) => { success: boolean; error?: string; returnRecord?: ReturnRecord };
-
-  addCustomer: (customer: Omit<Customer, "id" | "createdAt" | "totalDebt">) => Customer;
-  updateCustomer: (id: string, updates: Partial<Customer>) => void;
-  recordDebtPayment: (customerId: string, amount: number, paymentMethod: "CASH" | "GCASH", notes?: string) => void;
-  addManualDebt: (customerId: string, amount: number, notes: string) => void;
-
-  addExpense: (expense: Omit<Expense, "id" | "date" | "recordedBy">) => Expense;
-  openCashDrawer: (openingAmount: number, notes?: string) => void;
-  closeCashDrawer: (actualCashCount: number, notes?: string) => void;
-  logCashAdjustment: (amount: number, type: "IN" | "OUT", reason: string) => void;
-
-  logAuditEvent: (entry: Omit<AuditLogEntry, "id" | "createdAt">) => void;
-  
-  // Staff & Permissions
-  addStaff: (staffData: Omit<StaffUser, "id" | "createdAt">) => StaffUser;
-  updateStaff: (id: string, updates: Partial<StaffUser>) => void;
-  deleteStaff: (id: string) => void;
-  toggleStaffActive: (id: string) => void;
-  switchStaff: (staffId: string) => void;
-  hasPermission: (permission: keyof StaffPermissions) => boolean;
-  verifyOwnerPin: (pin: string) => boolean;
-
-  // Settings & Theme
-  updateSettings: (updates: Partial<StoreSettings>) => void;
-  setFontSizeMode: (mode: "NORMAL" | "LARGE") => void;
-  toggleProductBestseller: (productId: string) => void;
-
-  // Auth & Session
-  loginWithPin: (staffId: string, pin: string) => { success: boolean; error?: string };
-  loginWithEmail: (email: string, pass: string) => Promise<{ error?: string }>;
-  registerStoreAccount: (email: string, pass: string, storeName?: string) => Promise<{ error?: string; success?: boolean }>;
-  logout: () => Promise<void>;
-  quickDemoLogin: (role: UserRole) => void;
-  signInWithEmail: (email: string, pass: string) => Promise<{ error?: string }>;
-  signOut: () => Promise<void>;
-
-  // Shop Presets
-  loadShopPreset: (presetKey: "SARI_SARI" | "MOTOR_SHOP" | "PHARMACY" | "MILK_TEA") => void;
-
-  // Sync & Backup
-  syncCloud: () => Promise<void>;
-  exportDataJson: () => string;
-  importDataJson: (json: string) => boolean;
-  resetToDemoData: () => void;
+type PresetKey = ShopPreset["id"];
+export interface StockReceipt { id: string; supplier: string; reference: string; date: string; total: number; lines: { productId: string; quantity: number; cost: number }[]; paymentMethod: "CASH" | "GCASH" | "BANK" }
+export interface HeldCart { id: string; name: string; items: CartItem[]; createdAt: string }
+interface StoreData {
+  products: Product[]; customers: Customer[]; debtEntries: DebtEntry[]; transactions: Transaction[]; expenses: Expense[];
+  cashDrawer: CashDrawerShift; settings: StoreSettings; staffList: StaffUser[]; currentStaff: StaffUser;
+  auditLogs: AuditLogEntry[]; returnRecords: ReturnRecord[]; stockReceipts: StockReceipt[]; shiftHistory: CashDrawerShift[];
+  cart: CartItem[]; heldCarts: HeldCart[]; revision: number; currentShopPreset: PresetKey;
 }
-
-const StoreContext = createContext<StoreContextType | undefined>(undefined);
-
-export function StoreProvider({ children }: { children: React.ReactNode }) {
+const PREFIX = "PADDL_WORKSPACE_V4_";
+const ACTIVE = "PADDLR_CURRENT_PRESET";
+const id = (prefix: string) => prefix + "-" + crypto.randomUUID();
+const now = () => new Date().toISOString();
+function seed(key: PresetKey): StoreData {
+  const p = structuredClone(ALL_SHOP_PRESETS[key]);
+  return { products: p.products, customers: p.customers, debtEntries: p.debtEntries, transactions: p.transactions, expenses: p.expenses, settings: p.settings,
+    cashDrawer: p.cashDrawer, staffList: structuredClone(INITIAL_STAFF), currentStaff: structuredClone(INITIAL_STAFF[0]), auditLogs: [], returnRecords: [], stockReceipts: [], shiftHistory: [], cart: [], heldCarts: [], revision: 0, currentShopPreset: key };
+}
+function validateBackup(value: unknown): asserts value is StoreData {
+  assert(value && typeof value === "object", "Invalid backup.");
+  const s = value as StoreData;
+  assert(s.currentShopPreset in ALL_SHOP_PRESETS, "Unknown industry in backup.");
+  for (const key of ["products", "customers", "transactions", "debtEntries", "expenses", "staffList", "auditLogs", "returnRecords", "cart", "heldCarts", "stockReceipts", "shiftHistory"] as const) assert(Array.isArray(s[key]), "Backup is missing " + key);
+  assert(s.settings?.storeName && s.cashDrawer && s.currentStaff?.id && s.staffList.some(u => u.role === "OWNER" && u.isActive), "Backup is missing store or owner details.");
+  assert(Number.isSafeInteger(s.revision) && s.revision >= 0, "Invalid backup revision.");
+  const ids = new Set<string>();
+  s.products.forEach(p => { assert(p.id && !ids.has(p.id), "Duplicate or missing product ID."); ids.add(p.id); validateProduct(p); });
+  s.customers.forEach(c => { assert(typeof c.name === "string" && typeof c.phone === "string", "Invalid customer."); nonnegative(c.totalDebt, "Customer balance"); nonnegative(c.creditLimit, "Credit limit"); });
+  s.transactions.forEach(t => { assert(t.id && Array.isArray(t.items) && Number.isFinite(Date.parse(t.createdAt)), "Invalid sale."); nonnegative(t.total, "Sale total"); t.items.forEach(i => { positive(i.quantity, "Sale quantity"); nonnegative(i.subtotal, "Line subtotal"); validateProduct(i.product); }); });
+  s.expenses.forEach(e => positive(e.amount, "Expense"));
+  s.debtEntries.forEach(e => { nonnegative(e.amount, "Debt entry"); nonnegative(e.balanceAfter, "Debt balance"); });
+  nonnegative(s.cashDrawer.openingCash, "Opening cash"); assert(Number.isFinite(s.cashDrawer.expectedCash), "Invalid cash drawer.");
+}
+function useStoreState() {
+  const [state, setState] = useState<StoreData>(() => seed("SARI_SARI"));
+  const ref = useRef(state);
   const [mounted, setMounted] = useState(false);
-
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
-  const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
-  const [debtEntries, setDebtEntries] = useState<DebtEntry[]>(INITIAL_DEBT_ENTRIES);
-  const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
-  const [expenses, setExpenses] = useState<Expense[]>(INITIAL_EXPENSES);
-  const [cashDrawer, setCashDrawer] = useState<CashDrawerShift>(INITIAL_CASH_DRAWER);
-  const [settings, setSettings] = useState<StoreSettings>(INITIAL_SETTINGS);
-  const [staffList, setStaffList] = useState<StaffUser[]>(INITIAL_STAFF);
-  const [currentStaff, setCurrentStaff] = useState<StaffUser>(INITIAL_STAFF[2]); // Maria Santos
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(INITIAL_AUDIT_LOGS);
-  const [returnRecords, setReturnRecords] = useState<ReturnRecord[]>(INITIAL_RETURNS);
-  
-  const [isOnline, setIsOnline] = useState(true);
-  const [pendingSyncCount, setPendingSyncCount] = useState(0);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isSupabaseActive, setIsSupabaseActive] = useState(false);
-  const [sessionUser, setSessionUser] = useState<any | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [currentShopPreset, setCurrentShopPreset] = useState<"SARI_SARI" | "MOTOR_SHOP" | "PHARMACY" | "MILK_TEA">("SARI_SARI");
-
-  // Derived sync status
-  const syncStatus: "synced" | "syncing" | "offline" = !isOnline
-    ? "offline"
-    : isSyncing
-    ? "syncing"
-    : "synced";
-
-  // Load Initial Data (LocalStorage + Supabase Remote Sync)
+  const [isAuthenticated, setAuthenticated] = useState(false);
+  const [isOnline, setOnline] = useState(true);
+  const [isSyncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [sessionUser, setSessionUser] = useState<User | null>(null);
+  const [isAuthLoading, setAuthLoading] = useState(false);
+  const cloudRevision = useRef<number | null>(null);
+  const cloudKey = useRef<string | null>(null);
+  const syncedLocalRevision = useRef(-1);
+  const syncing = useRef(false);
+  const ownerApproval = useRef(0);
+  function apply(s: StoreData) { ref.current = s; setState(s); }
   useEffect(() => {
-    // 1. Initial Local Storage Load
     try {
-      // Check auth session
-      const authSession = localStorage.getItem("PADDLR_AUTH_SESSION");
-      if (authSession) {
-        try {
-          const parsedAuth = JSON.parse(authSession);
-          if (parsedAuth && parsedAuth.authenticated) {
-            setIsAuthenticated(true);
-          }
-        } catch {}
+      const selected = localStorage.getItem(ACTIVE) as PresetKey;
+      const key = selected in ALL_SHOP_PRESETS ? selected : "SARI_SARI";
+      const saved = localStorage.getItem(PREFIX + key);
+      let initial = seed(key);
+      if (saved) { const parsed = JSON.parse(saved); validateBackup(parsed); initial = parsed; }
+      else {
+        const legacy = localStorage.getItem("PEDDLR_PRO_STORE_V3");
+        if (legacy) { const migrated = { ...initial, ...JSON.parse(legacy), currentShopPreset: key, revision: 0 }; validateBackup(migrated); initial = migrated; }
       }
-
-      const savedPreset = localStorage.getItem("PADDLR_CURRENT_PRESET");
-      if (savedPreset && (savedPreset === "SARI_SARI" || savedPreset === "MOTOR_SHOP" || savedPreset === "PHARMACY" || savedPreset === "MILK_TEA")) {
-        setCurrentShopPreset(savedPreset as any);
+      apply(initial);
+      const auth = JSON.parse(sessionStorage.getItem("PADDL_SESSION") || "null");
+      if (auth?.staffId && initial.staffList.some(s => s.id === auth.staffId && s.isActive)) {
+        apply({ ...initial, currentStaff: initial.staffList.find(s => s.id === auth.staffId)! }); setAuthenticated(true);
       }
-
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.products) setProducts(parsed.products);
-        if (parsed.customers) setCustomers(parsed.customers);
-        if (parsed.debtEntries) setDebtEntries(parsed.debtEntries);
-        if (parsed.transactions) setTransactions(parsed.transactions);
-        if (parsed.expenses) setExpenses(parsed.expenses);
-        if (parsed.cashDrawer) setCashDrawer(parsed.cashDrawer);
-        if (parsed.settings) setSettings(parsed.settings);
-        if (parsed.staffList) setStaffList(parsed.staffList);
-        if (parsed.currentStaff) setCurrentStaff(parsed.currentStaff);
-        if (parsed.auditLogs) setAuditLogs(parsed.auditLogs);
-        if (parsed.returnRecords) setReturnRecords(parsed.returnRecords);
-      }
-    } catch (e) {
-      console.error("Failed to load store from localStorage", e);
-    }
-    setMounted(true);
-
-    // 2. Online/Offline Listener
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    // 3. Supabase Auth & Realtime Sync if configured
-    let realtimeChannel: any = null;
-    let authSub: any = null;
-
-    if (isSupabaseConfigured() && supabase) {
-      const client = supabase;
-      setIsSupabaseActive(true);
-
-      // Auth Session check
-      client.auth.getSession().then(({ data: { session } }) => {
-        setSessionUser(session?.user || null);
-      });
-
-      const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
-        setSessionUser(session?.user || null);
-      });
-      authSub = authListener;
-
-      const syncFromSupabase = async () => {
-        try {
-          const [prodRes, custRes, debtRes, txnRes, expRes] = await Promise.all([
-            client.from("products").select("*"),
-            client.from("customers").select("*"),
-            client.from("debt_entries").select("*"),
-            client.from("transactions").select("*").order("created_at", { ascending: false }),
-            client.from("expenses").select("*").order("date", { ascending: false }),
-          ]);
-
-          if (prodRes.data && prodRes.data.length > 0) {
-            setProducts(prodRes.data.map((p: any) => ({
-              id: p.id,
-              name: p.name,
-              barcode: p.barcode,
-              category: p.category,
-              costPrice: Number(p.cost_price),
-              sellingPrice: Number(p.selling_price),
-              stock: p.stock,
-              minStockAlert: p.min_stock_alert,
-              unit: p.unit,
-              emoji: p.emoji,
-              isActive: p.is_active,
-              createdAt: p.created_at,
-              updatedAt: p.updated_at,
-            })));
-          }
-
-          if (custRes.data && custRes.data.length > 0) {
-            setCustomers(custRes.data.map((c: any) => ({
-              id: c.id,
-              name: c.name,
-              phone: c.phone || "",
-              address: c.address || "",
-              creditLimit: Number(c.credit_limit),
-              totalDebt: Number(c.total_debt),
-              notes: c.notes || "",
-              createdAt: c.created_at,
-            })));
-          }
-
-          if (debtRes.data && debtRes.data.length > 0) {
-            setDebtEntries(debtRes.data.map((d: any) => ({
-              id: d.id,
-              customerId: d.customer_id,
-              customerName: d.customer_name,
-              transactionId: d.transaction_id,
-              type: d.type,
-              amount: Number(d.amount),
-              balanceAfter: Number(d.balance_after),
-              notes: d.notes,
-              date: d.date,
-              recordedBy: d.recorded_by,
-            })));
-          }
-
-          if (txnRes.data && txnRes.data.length > 0) {
-            setTransactions(txnRes.data.map((t: any) => ({
-              id: t.id,
-              receiptNumber: t.receipt_number,
-              items: t.items,
-              subtotal: Number(t.subtotal),
-              discountType: t.discount_type,
-              discountAmount: Number(t.discount_amount),
-              total: Number(t.total),
-              paymentMethod: t.payment_method,
-              amountTendered: Number(t.amount_tendered),
-              changeDue: Number(t.change_due),
-              customerId: t.customer_id,
-              customerName: t.customer_name,
-              cashierName: t.cashier_name,
-              status: t.status,
-              ewalletRefNumber: t.ewallet_ref_number,
-              isBackdated: t.is_backdated,
-              notes: t.notes,
-              createdAt: t.created_at,
-            })));
-          }
-
-          if (expRes.data && expRes.data.length > 0) {
-            setExpenses(expRes.data.map((e: any) => ({
-              id: e.id,
-              category: e.category,
-              amount: Number(e.amount),
-              description: e.description,
-              date: e.date,
-              paymentMethod: e.payment_method,
-              receiptRef: e.receipt_ref,
-              recordedBy: e.recorded_by,
-            })));
-          }
-        } catch (err) {
-          console.warn("Supabase auto-fetch failed:", err);
-        }
-      };
-
-      syncFromSupabase();
-
-      // Multi-device realtime listener
-      realtimeChannel = client
-        .channel("peddlr-realtime-sync")
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "products" },
-          () => syncFromSupabase()
-        )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "transactions" },
-          () => syncFromSupabase()
-        )
-        .subscribe();
-    }
-
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-      if (realtimeChannel && supabase) {
-        supabase.removeChannel(realtimeChannel);
-      }
-      if (authSub?.subscription) {
-        authSub.subscription.unsubscribe();
+    } catch { toast.error("Saved data could not be loaded. Your original backup has been preserved. Restore a valid backup in Settings."); }
+    setMounted(true); setOnline(navigator.onLine);
+    const online = () => setOnline(true), offline = () => setOnline(false);
+    const storage = (e: StorageEvent) => {
+      if (e.key === PREFIX + ref.current.currentShopPreset && e.newValue) {
+        try { const next = JSON.parse(e.newValue); validateBackup(next); if (next.revision > ref.current.revision) apply({ ...next, currentStaff: ref.current.currentStaff }); } catch { /* Keep last known good state. */ }
       }
     };
+    window.addEventListener("online", online); window.addEventListener("offline", offline); window.addEventListener("storage", storage);
+    const auth = supabase?.auth.onAuthStateChange((_event, session) => { setSessionUser(session?.user || null); cloudRevision.current = null; cloudKey.current = null; syncedLocalRevision.current = -1; setLastSyncedAt(null); });
+    return () => { window.removeEventListener("online", online); window.removeEventListener("offline", offline); window.removeEventListener("storage", storage); auth?.data.subscription.unsubscribe(); };
   }, []);
-
-  // Audit Logger
-  const logAuditEvent = useCallback((entry: Omit<AuditLogEntry, "id" | "createdAt">) => {
-    const newEntry: AuditLogEntry = {
-      ...entry,
-      id: `audit-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      createdAt: new Date().toISOString(),
-    };
-    setAuditLogs((prev) => [newEntry, ...prev.slice(0, 199)]);
-  }, []);
-
-  // Save to LocalStorage
-  useEffect(() => {
-    if (!mounted) return;
-    try {
-      const stateToSave = {
-        products,
-        customers,
-        debtEntries,
-        transactions,
-        expenses,
-        cashDrawer,
-        settings,
-        staffList,
-        currentStaff,
-        auditLogs,
-        returnRecords,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
-    } catch (e) {
-      console.error("Failed to save store to localStorage", e);
+  function commit<T>(operation: (draft: StoreData) => T): T {
+    assert(mounted, "Store is still loading.");
+    const s = ref.current;
+    const disk = localStorage.getItem(PREFIX + s.currentShopPreset);
+    if (disk) {
+      const latest = JSON.parse(disk);
+      if (latest.revision > s.revision) { validateBackup(latest); apply({ ...latest, currentStaff: s.currentStaff }); throw new Error("This store changed in another tab. Review the refreshed data and try again."); }
     }
-  }, [
-    mounted,
-    products,
-    customers,
-    debtEntries,
-    transactions,
-    expenses,
-    cashDrawer,
-    settings,
-    staffList,
-    currentStaff,
-    auditLogs,
-    returnRecords,
-  ]);
-
-  // Product Actions
-  const addProduct = (prodData: Omit<Product, "id" | "createdAt" | "updatedAt">): Product => {
-    const newProduct: Product = {
-      ...prodData,
-      id: `prod-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    setProducts((prev) => [newProduct, ...prev]);
-    setPendingSyncCount((c) => c + 1);
-
-    if (supabase && isSupabaseConfigured()) {
-      supabase.from("products").insert([{
-        id: newProduct.id,
-        name: newProduct.name,
-        barcode: newProduct.barcode,
-        category: newProduct.category,
-        cost_price: newProduct.costPrice,
-        selling_price: newProduct.sellingPrice,
-        stock: newProduct.stock,
-        min_stock_alert: newProduct.minStockAlert,
-        unit: newProduct.unit,
-        emoji: newProduct.emoji,
-        is_active: newProduct.isActive,
-      }]).then(({ error }) => {
-        if (error) console.error("Supabase insert product error", error);
-      });
-    }
-
-    // Audit Log for product creation
-    logAuditEvent({
-      action: "PRODUCT_CREATED",
-      description: `Added product ${newProduct.name} (₱${newProduct.sellingPrice.toFixed(2)})`,
-      performedBy: currentStaff.name,
-      recordId: newProduct.id,
-    });
-
-    return newProduct;
-  };
-
-  const updateProduct = (id: string, updates: Partial<Product>) => {
-    setProducts((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p
-      )
-    );
-    setPendingSyncCount((c) => c + 1);
-
-    logAuditEvent({
-      action: "PRODUCT_UPDATED",
-      description: `Updated product details for ID ${id}`,
-      performedBy: currentStaff.name,
-      recordId: id,
-    });
-
-    if (supabase && isSupabaseConfigured()) {
-      const dbUpdates: any = {};
-      if (updates.name !== undefined) dbUpdates.name = updates.name;
-      if (updates.barcode !== undefined) dbUpdates.barcode = updates.barcode;
-      if (updates.category !== undefined) dbUpdates.category = updates.category;
-      if (updates.costPrice !== undefined) dbUpdates.cost_price = updates.costPrice;
-      if (updates.sellingPrice !== undefined) dbUpdates.selling_price = updates.sellingPrice;
-      if (updates.stock !== undefined) dbUpdates.stock = updates.stock;
-      if (updates.minStockAlert !== undefined) dbUpdates.min_stock_alert = updates.minStockAlert;
-      if (updates.unit !== undefined) dbUpdates.unit = updates.unit;
-      if (updates.emoji !== undefined) dbUpdates.emoji = updates.emoji;
-      if (updates.isActive !== undefined) dbUpdates.is_active = updates.isActive;
-
-      supabase.from("products").update(dbUpdates).eq("id", id).then(({ error }) => {
-        if (error) console.error("Supabase update product error", error);
-      });
-    }
-  };
-
-  const deleteProduct = (id: string) => {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
-    setPendingSyncCount((c) => c + 1);
-
-    logAuditEvent({
-      action: "SETTINGS_CHANGED",
-      description: `Removed product ID ${id}`,
-      performedBy: currentStaff.name,
-      recordId: id,
-    });
-
-    if (supabase && isSupabaseConfigured()) {
-      supabase.from("products").delete().eq("id", id).then(({ error }) => {
-        if (error) console.error("Supabase delete product error", error);
-      });
-    }
-  };
-
-  const adjustProductStock = (id: string, delta: number, reason: string) => {
-    setProducts((prev) =>
-      prev.map((p) => {
-        if (p.id === id) {
-          const newStock = Math.max(0, p.stock + delta);
-          logAuditEvent({
-            action: "STOCK_ADJUSTED",
-            description: `Stock adjusted for ${p.name}: ${delta > 0 ? "+" : ""}${delta} (${reason})`,
-            performedBy: currentStaff.name,
-            recordId: id,
-            previousValue: `${p.stock}`,
-            newValue: `${newStock}`,
-          });
-          if (supabase && isSupabaseConfigured()) {
-            supabase.from("products").update({ stock: newStock }).eq("id", id).then();
-          }
-          return { ...p, stock: newStock, updatedAt: new Date().toISOString() };
-        }
-        return p;
-      })
-    );
-    setPendingSyncCount((c) => c + 1);
-  };
-
-  // Transaction / POS Checkout
-  const processCheckout = (data: {
-    items: CartItem[];
-    subtotal: number;
-    discountType?: "NONE" | "SENIOR_PWD_20" | "CUSTOM";
-    discountAmount: number;
-    total: number;
-    paymentMethod: Transaction["paymentMethod"];
-    amountTendered: number;
-    changeDue: number;
-    customerId?: string;
-    customerName?: string;
-    ewalletRefNumber?: string;
-    splitDetail?: SplitPaymentDetail;
-    isBackdated?: boolean;
-    customDate?: string;
-    notes?: string;
-  }): Transaction => {
-    const now = new Date();
-    const dateStr = data.customDate || now.toISOString();
-
-    const receiptNum = `REC-${now.getFullYear()}${String(now.getMonth() + 1).padStart(
-      2,
-      "0"
-    )}${String(now.getDate()).padStart(2, "0")}-${String(
-      transactions.length + 1
-    ).padStart(4, "0")}`;
-
-    const newTxn: Transaction = {
-      id: `txn-${Date.now()}`,
-      receiptNumber: receiptNum,
-      items: data.items,
-      subtotal: data.subtotal,
-      discountType: data.discountType || "NONE",
-      discountAmount: data.discountAmount,
-      total: data.total,
-      paymentMethod: data.paymentMethod,
-      amountTendered: data.amountTendered,
-      changeDue: data.changeDue,
-      customerId: data.customerId,
-      customerName: data.customerName,
-      cashierName: currentStaff.name,
-      status: "COMPLETED",
-      ewalletRefNumber: data.ewalletRefNumber,
-      splitDetail: data.splitDetail,
-      isBackdated: Boolean(data.isBackdated),
-      notes: data.notes,
-      createdAt: dateStr,
-    };
-
-    // 1. Deduct Stock for items locally and in Supabase
-    setProducts((prev) =>
-      prev.map((p) => {
-        const itemSold = data.items.find((item) => item.product.id === p.id);
-        if (itemSold) {
-          const newStock = Math.max(0, p.stock - itemSold.quantity);
-          if (supabase && isSupabaseConfigured()) {
-            supabase.from("products").update({ stock: newStock }).eq("id", p.id).then();
-          }
-          return {
-            ...p,
-            stock: newStock,
-            updatedAt: new Date().toISOString(),
-          };
-        }
-        return p;
-      })
-    );
-
-    // 2. If Payment is Credit / Utang, record debt
-    if (data.paymentMethod === "CREDIT_UTANG" && data.customerId) {
-      setCustomers((prev) =>
-        prev.map((c) => {
-          if (c.id === data.customerId) {
-            const updatedDebt = c.totalDebt + data.total;
-            if (supabase && isSupabaseConfigured()) {
-              supabase.from("customers").update({ total_debt: updatedDebt }).eq("id", c.id).then();
-            }
-            return { ...c, totalDebt: updatedDebt };
-          }
-          return c;
-        })
-      );
-
-      const debtEntry: DebtEntry = {
-        id: `debt-${Date.now()}`,
-        customerId: data.customerId,
-        customerName: data.customerName || "Customer",
-        transactionId: newTxn.id,
-        type: "DEBT_INCREASE",
-        amount: data.total,
-        balanceAfter:
-          (customers.find((c) => c.id === data.customerId)?.totalDebt || 0) +
-          data.total,
-        notes: `Purchased ${data.items.length} items (${newTxn.receiptNumber})`,
-        date: dateStr,
-        recordedBy: currentStaff.name,
-      };
-
-      setDebtEntries((prev) => [debtEntry, ...prev]);
-
-      if (supabase && isSupabaseConfigured()) {
-        supabase.from("debt_entries").insert([{
-          id: debtEntry.id,
-          customer_id: debtEntry.customerId,
-          customer_name: debtEntry.customerName,
-          transaction_id: debtEntry.transactionId,
-          type: debtEntry.type,
-          amount: debtEntry.amount,
-          balance_after: debtEntry.balanceAfter,
-          notes: debtEntry.notes,
-          date: debtEntry.date,
-          recorded_by: debtEntry.recordedBy,
-        }]).then();
-      }
-    }
-
-    // 3. Cash Drawer reconciliation
-    if (data.paymentMethod === "CASH" && cashDrawer.status === "OPEN") {
-      setCashDrawer((prev) => ({
-        ...prev,
-        cashSales: prev.cashSales + data.total,
-        expectedCash: prev.expectedCash + data.total,
-      }));
-    } else if (data.paymentMethod === "SPLIT" && data.splitDetail && cashDrawer.status === "OPEN") {
-      setCashDrawer((prev) => ({
-        ...prev,
-        cashSales: prev.cashSales + data.splitDetail!.cashAmount,
-        expectedCash: prev.expectedCash + data.splitDetail!.cashAmount,
-      }));
-    }
-
-    setTransactions((prev) => [newTxn, ...prev]);
-    setPendingSyncCount((c) => c + 1);
-
-    // 4. Log Audit Event
-    logAuditEvent({
-      action: "SALE_CREATED",
-      description: `Sale ${receiptNum} completed for ₱${data.total.toFixed(2)} (${data.paymentMethod})`,
-      performedBy: currentStaff.name,
-      recordId: newTxn.id,
-      newValue: `₱${data.total.toFixed(2)}`,
-    });
-
-    // 5. Insert into Supabase transactions
-    if (supabase && isSupabaseConfigured()) {
-      supabase.from("transactions").insert([{
-        id: newTxn.id,
-        receipt_number: newTxn.receiptNumber,
-        items: newTxn.items,
-        subtotal: newTxn.subtotal,
-        discount_type: newTxn.discountType,
-        discount_amount: newTxn.discountAmount,
-        total: newTxn.total,
-        payment_method: newTxn.paymentMethod,
-        amount_tendered: newTxn.amountTendered,
-        change_due: newTxn.changeDue,
-        customer_id: newTxn.customerId,
-        customer_name: newTxn.customerName,
-        cashier_name: newTxn.cashierName,
-        status: newTxn.status,
-        ewallet_ref_number: newTxn.ewalletRefNumber,
-        is_backdated: newTxn.isBackdated,
-        notes: newTxn.notes,
-        created_at: newTxn.createdAt,
-      }]).then(({ error }) => {
-        if (error) console.error("Supabase insert transaction error", error);
-      });
-    }
-
-    return newTxn;
-  };
-
-  // Void Transaction (Restores inventory, reverses financial impact, marks VOIDED)
-  const voidTransaction = (params: {
-    transactionId: string;
-    reason: string;
-    notes?: string;
-  }): { success: boolean; error?: string } => {
-    const txn = transactions.find((t) => t.id === params.transactionId);
-    if (!txn) return { success: false, error: "Transaction not found." };
-    if (txn.status === "VOIDED" || txn.status === "VOID") {
-      return { success: false, error: "Transaction is already voided." };
-    }
-
-    // 1. Restore inventory stock
-    setProducts((prev) =>
-      prev.map((p) => {
-        const item = txn.items.find((i) => i.product.id === p.id);
-        if (item) {
-          const restoredStock = p.stock + item.quantity;
-          if (supabase && isSupabaseConfigured()) {
-            supabase
-              .from("products")
-              .update({ stock: restoredStock, updated_at: new Date().toISOString() })
-              .eq("id", p.id)
-              .then();
-          }
-          return { ...p, stock: restoredStock, updatedAt: new Date().toISOString() };
-        }
-        return p;
-      })
-    );
-
-    // 2. Reverse customer debt if credit/utang
-    if (txn.paymentMethod === "CREDIT_UTANG" && txn.customerId) {
-      setCustomers((prev) =>
-        prev.map((c) => {
-          if (c.id === txn.customerId) {
-            const restoredDebt = Math.max(0, c.totalDebt - txn.total);
-            if (supabase && isSupabaseConfigured()) {
-              supabase.from("customers").update({ total_debt: restoredDebt }).eq("id", c.id).then();
-            }
-            return { ...c, totalDebt: restoredDebt };
-          }
-          return c;
-        })
-      );
-
-      const debtEntry: DebtEntry = {
-        id: `debt-void-${Date.now()}`,
-        customerId: txn.customerId,
-        customerName: txn.customerName || "Customer",
-        transactionId: txn.id,
-        type: "PAYMENT_RECEIVED", // Reverses the debt increase
-        amount: txn.total,
-        balanceAfter: Math.max(0, (customers.find((c) => c.id === txn.customerId)?.totalDebt || 0) - txn.total),
-        notes: `VOIDED SALE: ${txn.receiptNumber} (${params.reason})`,
-        date: new Date().toISOString(),
-        recordedBy: currentStaff.name,
-      };
-      setDebtEntries((prev) => [debtEntry, ...prev]);
-    }
-
-    // 3. Adjust cash drawer if cash sale
-    if (txn.paymentMethod === "CASH" && cashDrawer.status === "OPEN") {
-      setCashDrawer((prev) => ({
-        ...prev,
-        cashSales: Math.max(0, prev.cashSales - txn.total),
-        expectedCash: Math.max(0, prev.expectedCash - txn.total),
-      }));
-    } else if (txn.paymentMethod === "SPLIT" && txn.splitDetail && cashDrawer.status === "OPEN") {
-      setCashDrawer((prev) => ({
-        ...prev,
-        cashSales: Math.max(0, prev.cashSales - txn.splitDetail!.cashAmount),
-        expectedCash: Math.max(0, prev.expectedCash - txn.splitDetail!.cashAmount),
-      }));
-    }
-
-    // 4. Update transaction status
-    const voidTime = new Date().toISOString();
-    setTransactions((prev) =>
-      prev.map((t) =>
-        t.id === params.transactionId
-          ? {
-              ...t,
-              status: "VOIDED",
-              voidReason: params.reason,
-              voidNotes: params.notes,
-              voidedBy: currentStaff.name,
-              voidedAt: voidTime,
-            }
-          : t
-      )
-    );
-
-    // 5. Audit Log
-    logAuditEvent({
-      action: "SALE_VOIDED",
-      description: `Transaction ${txn.receiptNumber} voided. Reason: ${params.reason}`,
-      performedBy: currentStaff.name,
-      recordId: txn.id,
-      previousValue: `Total ₱${txn.total.toFixed(2)}`,
-      newValue: "VOIDED",
-    });
-
-    if (supabase && isSupabaseConfigured()) {
-      supabase
-        .from("transactions")
-        .update({ status: "VOIDED", notes: `VOIDED: ${params.reason}` })
-        .eq("id", params.transactionId)
-        .then();
-    }
-
-    setPendingSyncCount((c) => c + 1);
-    return { success: true };
-  };
-
-  // Process Return / Refund (Item-level or entire order, updates inventory & records history)
-  const processReturn = (params: {
-    transactionId: string;
-    returnedItems: { productId: string; quantity: number }[];
-    reason: string;
-    notes?: string;
-  }): { success: boolean; error?: string; returnRecord?: ReturnRecord } => {
-    const txn = transactions.find((t) => t.id === params.transactionId);
-    if (!txn) return { success: false, error: "Transaction not found." };
-    if (txn.status === "VOIDED" || txn.status === "VOID") {
-      return { success: false, error: "Cannot return items from a voided transaction." };
-    }
-
-    // Calculate previously returned quantities for this transaction
-    const previouslyReturnedQty: Record<string, number> = {};
-    (txn.returnHistory || []).forEach((r) => {
-      r.returnedItems.forEach((ri) => {
-        previouslyReturnedQty[ri.productId] = (previouslyReturnedQty[ri.productId] || 0) + ri.quantity;
-      });
-    });
-
-    const returnItemsDetail: ReturnItem[] = [];
-    let totalRefundAmount = 0;
-
-    for (const ret of params.returnedItems) {
-      if (ret.quantity <= 0) continue;
-      const originalItem = txn.items.find((i) => i.product.id === ret.productId);
-      if (!originalItem) {
-        return { success: false, error: `Product ${ret.productId} was not part of this transaction.` };
-      }
-      const alreadyReturned = previouslyReturnedQty[ret.productId] || 0;
-      const maxReturnable = originalItem.quantity - alreadyReturned;
-      if (ret.quantity > maxReturnable) {
-        return {
-          success: false,
-          error: `Cannot return ${ret.quantity} units of ${originalItem.product.name}. Only ${maxReturnable} available to return.`,
-        };
-      }
-
-      // Proportional refund calculation
-      const effectiveItemPrice = originalItem.subtotal / originalItem.quantity;
-      const refundForThisItem = Math.round(effectiveItemPrice * ret.quantity * 100) / 100;
-      totalRefundAmount += refundForThisItem;
-
-      returnItemsDetail.push({
-        productId: ret.productId,
-        productName: originalItem.product.name,
-        quantity: ret.quantity,
-        unitPrice: originalItem.product.sellingPrice,
-        refundAmount: refundForThisItem,
-      });
-    }
-
-    if (returnItemsDetail.length === 0) {
-      return { success: false, error: "No valid items selected for return." };
-    }
-
-    // 1. Restore stock for returned items
-    setProducts((prev) =>
-      prev.map((p) => {
-        const ret = returnItemsDetail.find((ri) => ri.productId === p.id);
-        if (ret) {
-          const restoredStock = p.stock + ret.quantity;
-          if (supabase && isSupabaseConfigured()) {
-            supabase
-              .from("products")
-              .update({ stock: restoredStock, updated_at: new Date().toISOString() })
-              .eq("id", p.id)
-              .then();
-          }
-          return { ...p, stock: restoredStock, updatedAt: new Date().toISOString() };
-        }
-        return p;
-      })
-    );
-
-    // 2. Adjust Utang / Customer debt if credit
-    if (txn.paymentMethod === "CREDIT_UTANG" && txn.customerId) {
-      setCustomers((prev) =>
-        prev.map((c) => {
-          if (c.id === txn.customerId) {
-            const restoredDebt = Math.max(0, c.totalDebt - totalRefundAmount);
-            if (supabase && isSupabaseConfigured()) {
-              supabase.from("customers").update({ total_debt: restoredDebt }).eq("id", c.id).then();
-            }
-            return { ...c, totalDebt: restoredDebt };
-          }
-          return c;
-        })
-      );
-    }
-
-    // 3. Adjust Cash Drawer if cash refund
-    if (txn.paymentMethod === "CASH" && cashDrawer.status === "OPEN") {
-      setCashDrawer((prev) => ({
-        ...prev,
-        cashOut: prev.cashOut + totalRefundAmount,
-        expectedCash: Math.max(0, prev.expectedCash - totalRefundAmount),
-      }));
-    }
-
-    // 4. Create Return Record
-    const returnRecord: ReturnRecord = {
-      id: `ret-${Date.now()}`,
-      transactionId: txn.id,
-      receiptNumber: txn.receiptNumber,
-      returnedItems: returnItemsDetail,
-      totalRefundAmount,
-      reason: params.reason,
-      notes: params.notes,
-      processedBy: currentStaff.name,
-      createdAt: new Date().toISOString(),
-    };
-
-    setReturnRecords((prev) => [returnRecord, ...prev]);
-
-    // Check if fully returned
-    let allReturned = true;
-    for (const item of txn.items) {
-      const alreadyRet = previouslyReturnedQty[item.product.id] || 0;
-      const justRet = returnItemsDetail.find((ri) => ri.productId === item.product.id)?.quantity || 0;
-      if (alreadyRet + justRet < item.quantity) {
-        allReturned = false;
-        break;
-      }
-    }
-
-    const newStatus: TransactionStatus = allReturned ? "REFUNDED" : "PARTIALLY_RETURNED";
-    const newRefundedAmount = (txn.refundedAmount || 0) + totalRefundAmount;
-
-    setTransactions((prev) =>
-      prev.map((t) =>
-        t.id === params.transactionId
-          ? {
-              ...t,
-              status: newStatus,
-              refundedAmount: newRefundedAmount,
-              returnHistory: [returnRecord, ...(t.returnHistory || [])],
-            }
-          : t
-      )
-    );
-
-    // 5. Audit Log
-    logAuditEvent({
-      action: "ITEM_RETURNED",
-      description: `Returned ${returnItemsDetail.length} item(s) from ${txn.receiptNumber}. Refund: ₱${totalRefundAmount.toFixed(2)}. Reason: ${params.reason}`,
-      performedBy: currentStaff.name,
-      recordId: txn.id,
-      newValue: newStatus,
-    });
-
-    setPendingSyncCount((c) => c + 1);
-    return { success: true, returnRecord };
-  };
-
-  // Customer & Debt Actions
-  const addCustomer = (custData: Omit<Customer, "id" | "createdAt" | "totalDebt">): Customer => {
-    const newCust: Customer = {
-      ...custData,
-      id: `cust-${Date.now()}`,
-      totalDebt: 0,
-      createdAt: new Date().toISOString(),
-    };
-    setCustomers((prev) => [newCust, ...prev]);
-    setPendingSyncCount((c) => c + 1);
-
-    if (supabase && isSupabaseConfigured()) {
-      supabase.from("customers").insert([{
-        id: newCust.id,
-        name: newCust.name,
-        phone: newCust.phone,
-        address: newCust.address,
-        credit_limit: newCust.creditLimit,
-        total_debt: newCust.totalDebt,
-        notes: newCust.notes,
-      }]).then();
-    }
-
-    return newCust;
-  };
-
-  const updateCustomer = (id: string, updates: Partial<Customer>) => {
-    setCustomers((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
-    );
-    setPendingSyncCount((c) => c + 1);
-
-    if (supabase && isSupabaseConfigured()) {
-      const dbUpdates: any = {};
-      if (updates.name !== undefined) dbUpdates.name = updates.name;
-      if (updates.phone !== undefined) dbUpdates.phone = updates.phone;
-      if (updates.address !== undefined) dbUpdates.address = updates.address;
-      if (updates.creditLimit !== undefined) dbUpdates.credit_limit = updates.creditLimit;
-      if (updates.totalDebt !== undefined) dbUpdates.total_debt = updates.totalDebt;
-      if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
-
-      supabase.from("customers").update(dbUpdates).eq("id", id).then();
-    }
-  };
-
-  const recordDebtPayment = (
-    customerId: string,
-    amount: number,
-    paymentMethod: "CASH" | "GCASH",
-    notes?: string
-  ) => {
-    const cust = customers.find((c) => c.id === customerId);
-    if (!cust) return;
-
-    const newBalance = Math.max(0, cust.totalDebt - amount);
-
-    setCustomers((prev) =>
-      prev.map((c) => (c.id === customerId ? { ...c, totalDebt: newBalance } : c))
-    );
-
-    const debtEntry: DebtEntry = {
-      id: `debt-${Date.now()}`,
-      customerId,
-      customerName: cust.name,
-      type: "PAYMENT_RECEIVED",
-      amount,
-      balanceAfter: newBalance,
-      notes: notes || `Payment received via ${paymentMethod}`,
-      date: new Date().toISOString(),
-      recordedBy: currentStaff.name,
-    };
-
-    setDebtEntries((prev) => [debtEntry, ...prev]);
-
-    if (paymentMethod === "CASH" && cashDrawer.status === "OPEN") {
-      setCashDrawer((prev) => ({
-        ...prev,
-        cashIn: prev.cashIn + amount,
-        expectedCash: prev.expectedCash + amount,
-      }));
-    }
-
-    if (supabase && isSupabaseConfigured()) {
-      supabase.from("customers").update({ total_debt: newBalance }).eq("id", customerId).then();
-      supabase.from("debt_entries").insert([{
-        id: debtEntry.id,
-        customer_id: debtEntry.customerId,
-        customer_name: debtEntry.customerName,
-        type: debtEntry.type,
-        amount: debtEntry.amount,
-        balance_after: debtEntry.balanceAfter,
-        notes: debtEntry.notes,
-        date: debtEntry.date,
-        recorded_by: debtEntry.recordedBy,
-      }]).then();
-    }
-
-    setPendingSyncCount((c) => c + 1);
-  };
-
-  const addManualDebt = (customerId: string, amount: number, notes: string) => {
-    const cust = customers.find((c) => c.id === customerId);
-    if (!cust) return;
-
-    const newBalance = cust.totalDebt + amount;
-
-    setCustomers((prev) =>
-      prev.map((c) => (c.id === customerId ? { ...c, totalDebt: newBalance } : c))
-    );
-
-    const debtEntry: DebtEntry = {
-      id: `debt-${Date.now()}`,
-      customerId,
-      customerName: cust.name,
-      type: "DEBT_INCREASE",
-      amount,
-      balanceAfter: newBalance,
-      notes: notes || "Manual debt adjustment",
-      date: new Date().toISOString(),
-      recordedBy: currentStaff.name,
-    };
-
-    setDebtEntries((prev) => [debtEntry, ...prev]);
-
-    if (supabase && isSupabaseConfigured()) {
-      supabase.from("customers").update({ total_debt: newBalance }).eq("id", customerId).then();
-      supabase.from("debt_entries").insert([{
-        id: debtEntry.id,
-        customer_id: debtEntry.customerId,
-        customer_name: debtEntry.customerName,
-        type: debtEntry.type,
-        amount: debtEntry.amount,
-        balance_after: debtEntry.balanceAfter,
-        notes: debtEntry.notes,
-        date: debtEntry.date,
-        recorded_by: debtEntry.recordedBy,
-      }]).then();
-    }
-
-    setPendingSyncCount((c) => c + 1);
-  };
-
-  // Expense Actions
-  const addExpense = (
-    expenseData: Omit<Expense, "id" | "date" | "recordedBy">
-  ): Expense => {
-    const newExp: Expense = {
-      ...expenseData,
-      id: `exp-${Date.now()}`,
-      date: new Date().toISOString(),
-      recordedBy: currentStaff.name,
-    };
-
-    setExpenses((prev) => [newExp, ...prev]);
-
-    if (expenseData.paymentMethod === "CASH" && cashDrawer.status === "OPEN") {
-      setCashDrawer((prev) => ({
-        ...prev,
-        cashOut: prev.cashOut + expenseData.amount,
-        expectedCash: Math.max(0, prev.expectedCash - expenseData.amount),
-      }));
-    }
-
-    if (supabase && isSupabaseConfigured()) {
-      supabase.from("expenses").insert([{
-        id: newExp.id,
-        category: newExp.category,
-        amount: newExp.amount,
-        description: newExp.description,
-        date: newExp.date,
-        payment_method: newExp.paymentMethod,
-        receipt_ref: newExp.receiptRef,
-        recorded_by: newExp.recordedBy,
-      }]).then();
-    }
-
-    setPendingSyncCount((c) => c + 1);
-    return newExp;
-  };
-
-  // Cash Drawer Management
-  const openCashDrawer = (openingAmount: number, notes?: string) => {
-    const shift: CashDrawerShift = {
-      id: `shift-${Date.now()}`,
-      openedAt: new Date().toISOString(),
-      openedBy: currentStaff.name,
-      openingCash: openingAmount,
-      cashSales: 0,
-      cashIn: 0,
-      cashOut: 0,
-      expectedCash: openingAmount,
-      status: "OPEN",
-      notes,
-    };
-    setCashDrawer(shift);
-    setPendingSyncCount((c) => c + 1);
-  };
-
-  const closeCashDrawer = (actualCashCount: number, notes?: string) => {
-    const discrepancy = actualCashCount - cashDrawer.expectedCash;
-    setCashDrawer((prev) => ({
-      ...prev,
-      closedAt: new Date().toISOString(),
-      closedBy: currentStaff.name,
-      actualCash: actualCashCount,
-      discrepancy,
-      status: "CLOSED",
-      notes: notes || prev.notes,
-    }));
-    setPendingSyncCount((c) => c + 1);
-  };
-
-  const logCashAdjustment = (amount: number, type: "IN" | "OUT", reason: string) => {
-    if (cashDrawer.status !== "OPEN") return;
-    if (type === "IN") {
-      setCashDrawer((prev) => ({
-        ...prev,
-        cashIn: prev.cashIn + amount,
-        expectedCash: prev.expectedCash + amount,
-      }));
-    } else {
-      setCashDrawer((prev) => ({
-        ...prev,
-        cashOut: prev.cashOut + amount,
-        expectedCash: Math.max(0, prev.expectedCash - amount),
-      }));
-    }
-  };
-
-  // Settings & Staff
-  const updateSettings = (updates: Partial<StoreSettings>) => {
-    setSettings((prev) => ({ ...prev, ...updates }));
-    setPendingSyncCount((c) => c + 1);
-  };
-
-  const switchStaff = (staffId: string) => {
-    const s = staffList.find((item) => item.id === staffId);
-    if (s) setCurrentStaff(s);
-  };
-
-  // Sync / Backup / Reset
-  const syncCloud = async () => {
-    setIsSyncing(true);
-    const client = supabase;
-    if (client && isSupabaseConfigured()) {
-      try {
-        const { data: prodData } = await client.from("products").select("*");
-        if (prodData && prodData.length > 0) {
-          setProducts(prodData.map((p: any) => ({
-            id: p.id,
-            name: p.name,
-            barcode: p.barcode,
-            category: p.category,
-            costPrice: Number(p.cost_price),
-            sellingPrice: Number(p.selling_price),
-            stock: p.stock,
-            minStockAlert: p.min_stock_alert,
-            unit: p.unit,
-            emoji: p.emoji,
-            isActive: p.is_active,
-            createdAt: p.created_at,
-            updatedAt: p.updated_at,
-          })));
-        }
-      } catch (e) {
-        console.warn("Supabase manual sync fetch error", e);
-      }
-    }
-    await new Promise((r) => setTimeout(r, 600));
-    setPendingSyncCount(0);
-    setIsSyncing(false);
-  };
-
-  const exportDataJson = () => {
-    const state = {
-      products,
-      customers,
-      debtEntries,
-      transactions,
-      expenses,
-      cashDrawer,
-      settings,
-      staffList,
-      auditLogs,
-      returnRecords,
-      exportedAt: new Date().toISOString(),
-    };
-    return JSON.stringify(state, null, 2);
-  };
-
-  const importDataJson = (jsonStr: string): boolean => {
-    try {
-      const data = JSON.parse(jsonStr);
-      if (data.products) setProducts(data.products);
-      if (data.customers) setCustomers(data.customers);
-      if (data.debtEntries) setDebtEntries(data.debtEntries);
-      if (data.transactions) setTransactions(data.transactions);
-      if (data.expenses) setExpenses(data.expenses);
-      if (data.cashDrawer) setCashDrawer(data.cashDrawer);
-      if (data.settings) setSettings(data.settings);
-      if (data.staffList) setStaffList(data.staffList);
-      if (data.auditLogs) setAuditLogs(data.auditLogs);
-      if (data.returnRecords) setReturnRecords(data.returnRecords);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const resetToDemoData = () => {
-    setProducts(INITIAL_PRODUCTS);
-    setCustomers(INITIAL_CUSTOMERS);
-    setDebtEntries(INITIAL_DEBT_ENTRIES);
-    setTransactions(INITIAL_TRANSACTIONS);
-    setExpenses(INITIAL_EXPENSES);
-    setCashDrawer(INITIAL_CASH_DRAWER);
-    setSettings(INITIAL_SETTINGS);
-    setStaffList(INITIAL_STAFF);
-    setCurrentStaff(INITIAL_STAFF[2]);
-    setAuditLogs(INITIAL_AUDIT_LOGS);
-    setReturnRecords(INITIAL_RETURNS);
-    localStorage.removeItem(STORAGE_KEY);
-  };
-
-  const verifyOwnerPin = (pin: string): boolean => {
-    const ownerStaff = staffList.find((s) => s.role === "OWNER");
-    const configuredPin = settings.ownerPin || ownerStaff?.pin || "1234";
-    return pin.trim() === configuredPin.trim();
-  };
-
-  const hasPermission = (permission: keyof StaffPermissions): boolean => {
-    if (currentStaff.role === "OWNER") return true;
-    if (currentStaff.permissions && currentStaff.permissions[permission] !== undefined) {
-      return currentStaff.permissions[permission];
-    }
-    if (currentStaff.role === "MANAGER") {
-      return permission !== "canManageSettings" && permission !== "canManageUsers";
-    }
-    if (currentStaff.role === "CASHIER") {
-      return permission === "canProcessSales";
-    }
-    if (currentStaff.role === "INVENTORY_STAFF") {
-      return permission === "canManageInventory";
-    }
-    return false;
-  };
-
-  const addStaff = (staffData: Omit<StaffUser, "id" | "createdAt">): StaffUser => {
-    const newStaff: StaffUser = {
-      ...staffData,
-      id: `staff-${Date.now()}`,
-      isActive: true,
-      createdAt: new Date().toISOString(),
-    };
-    setStaffList((prev) => [...prev, newStaff]);
-    logAuditEvent({
-      action: "USER_CREATED",
-      description: `Created new staff user: ${newStaff.name} (${newStaff.role})`,
-      performedBy: currentStaff.name,
-      recordId: newStaff.id,
-    });
-    setPendingSyncCount((c) => c + 1);
-    return newStaff;
-  };
-
-  const updateStaff = (id: string, updates: Partial<StaffUser>) => {
-    setStaffList((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
-    );
-    if (currentStaff.id === id) {
-      setCurrentStaff((prev) => ({ ...prev, ...updates }));
-    }
-    logAuditEvent({
-      action: "USER_UPDATED",
-      description: `Updated staff permissions/details for ID ${id}`,
-      performedBy: currentStaff.name,
-      recordId: id,
-    });
-    setPendingSyncCount((c) => c + 1);
-  };
-
-  const deleteStaff = (id: string) => {
-    setStaffList((prev) => prev.filter((s) => s.id !== id));
-    logAuditEvent({
-      action: "SETTINGS_CHANGED",
-      description: `Removed staff user ID ${id}`,
-      performedBy: currentStaff.name,
-      recordId: id,
-    });
-    setPendingSyncCount((c) => c + 1);
-  };
-
-  const toggleStaffActive = (id: string) => {
-    setStaffList((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, isActive: !s.isActive } : s))
-    );
-    setPendingSyncCount((c) => c + 1);
-  };
-
-  const setFontSizeMode = (mode: "NORMAL" | "LARGE") => {
-    updateSettings({ fontSizeMode: mode });
-  };
-
-  // Authentication & Session Management
-  const loginWithPin = (staffId: string, pin: string) => {
-    const target = staffList.find((s) => s.id === staffId);
-    if (!target) {
-      return { success: false, error: "Staff account not found." };
-    }
-    if (!target.isActive) {
-      return { success: false, error: "This staff account is currently deactivated." };
-    }
-    if (target.pin !== pin.trim()) {
-      return { success: false, error: "Incorrect 4-digit PIN." };
-    }
-
-    setCurrentStaff(target);
-    setIsAuthenticated(true);
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem("PADDLR_AUTH_SESSION", JSON.stringify({
-          authenticated: true,
-          staffId: target.id,
-          staffName: target.name,
-          role: target.role,
-          timestamp: Date.now(),
-        }));
-      } catch {}
-    }
-    logAuditEvent({
-      action: "USER_LOGIN",
-      description: `Terminal PIN Login: ${target.name} (${target.role})`,
-      performedBy: target.name,
-      staffName: target.name,
-      staffRole: target.role,
-    });
-    return { success: true };
-  };
-
-  const loginWithEmail = async (email: string, pass: string): Promise<{ error?: string }> => {
-    setIsAuthLoading(true);
-    try {
-      if (supabase && isSupabaseConfigured()) {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password: pass,
-        });
-        if (error) {
-          setIsAuthLoading(false);
-          return { error: error.message };
-        }
-        if (data.user) {
-          setSessionUser(data.user);
-        }
-      }
-      const matched = staffList.find(
-        (s) => s.email.toLowerCase() === email.trim().toLowerCase()
-      );
-      const activeUser = matched || staffList.find((s) => s.role === "OWNER") || staffList[0];
-      setCurrentStaff(activeUser);
-      setIsAuthenticated(true);
-
-      if (typeof window !== "undefined") {
-        try {
-          localStorage.setItem("PADDLR_AUTH_SESSION", JSON.stringify({
-            authenticated: true,
-            email: email.trim(),
-            staffId: activeUser.id,
-            staffName: activeUser.name,
-            role: activeUser.role,
-            timestamp: Date.now(),
-          }));
-        } catch {}
-      }
-
-      logAuditEvent({
-        action: "USER_LOGIN",
-        description: `Cloud Account Login: ${email} as ${activeUser.name} (${activeUser.role})`,
-        performedBy: activeUser.name,
-        staffName: activeUser.name,
-        staffRole: activeUser.role,
-      });
-
-      setIsAuthLoading(false);
-      return {};
-    } catch (e: any) {
-      setIsAuthLoading(false);
-      return { error: e.message || "Failed to authenticate." };
-    }
-  };
-
-  const registerStoreAccount = async (email: string, pass: string, storeName?: string): Promise<{ error?: string; success?: boolean }> => {
-    setIsAuthLoading(true);
-    try {
-      if (!supabase || !isSupabaseConfigured()) {
-        setIsAuthLoading(false);
-        return { error: "Supabase cloud client is not configured." };
-      }
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password: pass,
-        options: {
-          data: {
-            store_name: storeName || settings.storeName,
-          }
-        }
-      });
-      setIsAuthLoading(false);
-      if (error) {
-        return { error: error.message };
-      }
-      return { success: true };
-    } catch (e: any) {
-      setIsAuthLoading(false);
-      return { error: e.message || "Registration failed." };
-    }
-  };
-
-  const logout = async () => {
-    logAuditEvent({
-      action: "USER_LOGOUT",
-      description: `Staff member ${currentStaff.name} logged out / locked terminal`,
-      performedBy: currentStaff.name,
-      staffName: currentStaff.name,
-      staffRole: currentStaff.role,
-    });
-
-    if (supabase && isSupabaseConfigured()) {
-      try {
-        await supabase.auth.signOut();
-      } catch {}
-    }
-    setSessionUser(null);
-    setIsAuthenticated(false);
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.removeItem("PADDLR_AUTH_SESSION");
-      } catch {}
-    }
-  };
-
-  const quickDemoLogin = (role: UserRole) => {
-    const target = staffList.find((s) => s.role === role) || staffList[0];
-    setCurrentStaff(target);
-    setIsAuthenticated(true);
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem("PADDLR_AUTH_SESSION", JSON.stringify({
-          authenticated: true,
-          staffId: target.id,
-          staffName: target.name,
-          role: target.role,
-          timestamp: Date.now(),
-        }));
-      } catch {}
-    }
-    logAuditEvent({
-      action: "USER_LOGIN",
-      description: `Quick Demo Login: ${target.name} (${target.role})`,
-      performedBy: target.name,
-      staffName: target.name,
-      staffRole: target.role,
-    });
-  };
-
-  const signInWithEmail = loginWithEmail;
-  const signOut = logout;
-
-  // Business Template / Preset Loader
-  const loadShopPreset = (presetKey: "SARI_SARI" | "MOTOR_SHOP" | "PHARMACY" | "MILK_TEA") => {
-    const preset = ALL_SHOP_PRESETS[presetKey];
-    if (!preset) return;
-
-    setProducts(preset.products);
-    setCustomers(preset.customers);
-    setDebtEntries(preset.debtEntries);
-    setTransactions(preset.transactions);
-    setExpenses(preset.expenses);
-    setCashDrawer(preset.cashDrawer);
-    setSettings(preset.settings);
-    setCurrentShopPreset(presetKey);
-
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem("PADDLR_CURRENT_PRESET", presetKey);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          products: preset.products,
-          customers: preset.customers,
-          debtEntries: preset.debtEntries,
-          transactions: preset.transactions,
-          expenses: preset.expenses,
-          cashDrawer: preset.cashDrawer,
-          settings: preset.settings,
-          staffList,
-          currentStaff,
-          auditLogs,
-          returnRecords,
-        }));
-      } catch {}
-    }
-
-    logAuditEvent({
-      action: "PRESET_LOADED",
-      description: `Loaded Business Template: ${preset.name} (${preset.badge})`,
-      performedBy: currentStaff.name,
-      staffName: currentStaff.name,
-      staffRole: currentStaff.role,
-    });
-  };
-
-  const toggleProductBestseller = (productId: string) => {
-    setProducts((prev) => {
-      const updated = prev.map((p) =>
-        p.id === productId ? { ...p, isBestseller: !p.isBestseller } : p
-      );
-      if (typeof window !== "undefined") {
-        try {
-          const current = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-          localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, products: updated }));
-        } catch {}
-      }
-      return updated;
-    });
-  };
-
-  return (
-    <StoreContext.Provider
-      value={{
-        products,
-        customers,
-        debtEntries,
-        transactions,
-        expenses,
-        cashDrawer,
-        settings,
-        staffList,
-        currentStaff,
-        isOnline,
-        pendingSyncCount,
-        isSyncing,
-        isSupabaseActive,
-        syncStatus,
-        auditLogs,
-        returnRecords,
-        sessionUser,
-        isAuthLoading,
-        isAuthenticated,
-        currentShopPreset,
-        loginWithPin,
-        loginWithEmail,
-        registerStoreAccount,
-        logout,
-        quickDemoLogin,
-        loadShopPreset,
-        addProduct,
-        updateProduct,
-        deleteProduct,
-        adjustProductStock,
-        processCheckout,
-        voidTransaction,
-        processReturn,
-        addCustomer,
-        updateCustomer,
-        recordDebtPayment,
-        addManualDebt,
-        addExpense,
-        openCashDrawer,
-        closeCashDrawer,
-        logCashAdjustment,
-        logAuditEvent,
-        addStaff,
-        updateStaff,
-        deleteStaff,
-        toggleStaffActive,
-        switchStaff,
-        hasPermission,
-        verifyOwnerPin,
-        updateSettings,
-        setFontSizeMode,
-        toggleProductBestseller,
-        signInWithEmail,
-        signOut,
-        syncCloud,
-        exportDataJson,
-        importDataJson,
-        resetToDemoData,
-      }}
-    >
-      {children}
-    </StoreContext.Provider>
-  );
-}
-
-export function useStore() {
-  const context = useContext(StoreContext);
-  if (!context) {
-    throw new Error("useStore must be used within a StoreProvider");
+    const next = structuredClone(s);
+    const result = operation(next); next.revision++;
+    try { localStorage.setItem(PREFIX + next.currentShopPreset, JSON.stringify(next)); }
+    catch { throw new Error("Could not save on this device. Free browser storage or export a backup before continuing."); }
+    apply(next); return result;
   }
-  return context;
+  function safely(operation: (draft: StoreData) => void) { try { commit(operation); } catch (e) { toast.error(e instanceof Error ? e.message : "Unable to save."); } }
+  function audit(s: StoreData, action: AuditLogEntry["action"], description: string) {
+    s.auditLogs.unshift({ id: id("audit"), action, description, performedBy: s.currentStaff.name, staffName: s.currentStaff.name, staffRole: s.currentStaff.role, createdAt: now() });
+  }
+  function hasPermission(permission: keyof StaffPermissions) {
+    const staff = ref.current.currentStaff;
+    if (!staff.isActive) return false;
+    if (staff.role === "OWNER") return true;
+    const aliases: Partial<Record<keyof StaffPermissions, keyof StaffPermissions>> = { canViewReports: "canViewFinancialReports", canManageSettings: "canModifySettings", canManageUsers: "canManageStaff" };
+    const explicit = staff.permissions?.[permission] ?? staff.permissions?.[aliases[permission] as keyof StaffPermissions];
+    if (explicit !== undefined) return explicit;
+    if (staff.role === "MANAGER") return !["canManageSettings", "canModifySettings", "canManageUsers", "canManageStaff"].includes(permission);
+    return staff.role === "CASHIER" ? permission === "canProcessSales" : permission === "canManageInventory";
+  }
+  function requirePermission(permission: keyof StaffPermissions) { assert(hasPermission(permission) || Date.now() < ownerApproval.current, "Owner approval is required for this action."); }
+  const logAuditEvent = (entry: Omit<AuditLogEntry, "id" | "createdAt">) => safely(s => { s.auditLogs.unshift({ ...entry, id: id("audit"), createdAt: now() }); });
+  const addProduct = (data: Omit<Product, "id" | "createdAt" | "updatedAt">) => commit(s => {
+    requirePermission("canManageInventory"); const p = { ...data, id: id("prod"), createdAt: now(), updatedAt: now() }; validateProduct(p);
+    assert(!p.barcode || !s.products.some(x => x.barcode === p.barcode), "Barcode already belongs to another product.");
+    s.products.unshift(p); audit(s, "PRODUCT_CREATED", "Added " + p.name); return p;
+  });
+  const updateProduct = (pid: string, updates: Partial<Product>) => safely(s => {
+    requirePermission("canManageInventory"); const index = s.products.findIndex(p => p.id === pid); assert(index >= 0, "Product not found.");
+    const p = { ...s.products[index], ...updates, id: pid, updatedAt: now() }; validateProduct(p);
+    assert(!p.barcode || !s.products.some(x => x.id !== pid && x.barcode === p.barcode), "Barcode already in use.");
+    s.products[index] = p; audit(s, "PRODUCT_UPDATED", "Updated " + p.name);
+  });
+  const deleteProduct = (pid: string) => updateProduct(pid, { isActive: false });
+  const adjustProductStock = (pid: string, delta: number, reason: string) => safely(s => {
+    requirePermission("canManageInventory"); const p = s.products.find(p => p.id === pid); assert(p, "Product not found."); assert(reason.trim(), "Enter a stock adjustment reason."); nonnegative(p.stock + delta, "Resulting stock");
+    p.stock = money(p.stock + delta); p.updatedAt = now(); audit(s, "STOCK_ADJUSTED", p.name + ": " + delta + " (" + reason + ")");
+  });
+  const processCheckout = (data: CheckoutInput): Transaction => commit(s => {
+    if (data.requestId) { const existing = s.transactions.find(t => t.requestId === data.requestId); if (existing) return existing; }
+    requirePermission("canProcessSales");
+    const checked = validateCheckout(data, s.products, s.customers);
+    if (checked.cashReceived > 0 && !data.isBackdated) assert(s.cashDrawer.status === "OPEN", "Open a cash shift before accepting cash.");
+    const txn: Transaction = { ...data, ...checked, id: id("txn"), receiptNumber: "PD-" + businessDate().replaceAll("-", "") + "-" + crypto.randomUUID().slice(0, 8).toUpperCase(), status: "COMPLETED", cashierName: s.currentStaff.name, createdAt: data.customDate || now(), amountTendered: data.paymentMethod === "CREDIT_UTANG" ? 0 : data.amountTendered };
+    if (txn.splitDetail) txn.splitDetail = { ...txn.splitDetail, cashAmount: checked.cashReceived };
+    checked.items.forEach(item => { const p = s.products.find(p => p.id === item.product.id)!; p.stock = money(p.stock - item.quantity); p.updatedAt = now(); });
+    if (txn.paymentMethod === "CREDIT_UTANG") {
+      const c = s.customers.find(c => c.id === txn.customerId)!; c.totalDebt = money(c.totalDebt + txn.total); txn.customerName = c.name;
+      s.debtEntries.unshift({ id: id("debt"), customerId: c.id, customerName: c.name, transactionId: txn.id, type: "DEBT_INCREASE", amount: txn.total, balanceAfter: c.totalDebt, notes: txn.receiptNumber, date: txn.createdAt, recordedBy: s.currentStaff.name });
+    }
+    if (!data.isBackdated) { s.cashDrawer.cashSales = money(s.cashDrawer.cashSales + checked.cashReceived); s.cashDrawer.expectedCash = money(s.cashDrawer.expectedCash + checked.cashReceived); }
+    s.transactions.unshift(txn); s.cart = []; audit(s, "SALE_CREATED", txn.receiptNumber + ": ₱" + txn.total.toFixed(2) + " via " + txn.paymentMethod); return txn;
+  });
+  function reversePayment(s: StoreData, txn: Transaction, amount: number) {
+    if (txn.paymentMethod === "CREDIT_UTANG") {
+      const c = s.customers.find(c => c.id === txn.customerId); assert(c, "Customer no longer exists.");
+      assert(c.totalDebt >= amount, "This credit has already been repaid. Reconcile the customer's repayment before reversing the sale.");
+      c.totalDebt = money(c.totalDebt - amount);
+      s.debtEntries.unshift({ id: id("debt"), customerId: c.id, customerName: c.name, transactionId: txn.id, type: "DEBT_ADJUSTMENT", amount, balanceAfter: c.totalDebt, notes: "Sale reversal: " + txn.receiptNumber, date: now(), recordedBy: s.currentStaff.name });
+    }
+    const previous = txn.refundedAmount || 0;
+    const cash = txn.paymentMethod === "CASH" ? amount : txn.paymentMethod === "SPLIT" ? money(money((previous + amount) * (txn.splitDetail?.cashAmount || 0) / (txn.total || 1)) - money(previous * (txn.splitDetail?.cashAmount || 0) / (txn.total || 1))) : 0;
+    if (cash > 0) { assert(s.cashDrawer.status === "OPEN", "Open a cash shift to issue the cash refund."); s.cashDrawer.cashOut = money(s.cashDrawer.cashOut + cash); s.cashDrawer.expectedCash = money(s.cashDrawer.expectedCash - cash); }
+  }
+  const voidTransaction = (params: { transactionId: string; reason: string; notes?: string }) => {
+    try { commit(s => {
+      requirePermission("canVoidTransactions"); const t = s.transactions.find(t => t.id === params.transactionId); assert(t, "Sale not found."); assert(t.status === "COMPLETED", "Only an unreturned, completed sale can be voided."); assert(params.reason.trim(), "Enter a reason.");
+      reversePayment(s, t, t.total); t.items.forEach(i => { const p = s.products.find(p => p.id === i.product.id); if (p) p.stock = money(p.stock + i.quantity); });
+      t.status = "VOIDED"; t.voidReason = params.reason; t.voidNotes = params.notes; t.voidedAt = now(); t.voidedBy = s.currentStaff.name;
+      audit(s, "SALE_VOIDED", t.receiptNumber + ": " + params.reason);
+    }); return { success: true }; } catch (e) { return { success: false, error: (e as Error).message }; }
+  };
+  const processReturn = (params: { transactionId: string; returnedItems: { productId: string; quantity: number }[]; reason: string; notes?: string; restock?: boolean }) => {
+    try { const returnRecord = commit(s => {
+      requirePermission("canProcessReturns"); const t = s.transactions.find(t => t.id === params.transactionId); assert(t, "Sale not found."); assert(params.reason.trim(), "Enter a return reason.");
+      const returnedItems = calculateReturn(t, params.returnedItems); const totalRefundAmount = money(returnedItems.reduce((a, i) => a + i.refundAmount, 0));
+      reversePayment(s, t, totalRefundAmount);
+      const record: ReturnRecord = { id: id("return"), transactionId: t.id, receiptNumber: t.receiptNumber, returnedItems, totalRefundAmount, restocked: params.restock !== false, reason: params.reason, notes: params.notes, processedBy: s.currentStaff.name, createdAt: now() };
+      if (record.restocked) returnedItems.forEach(i => { const p = s.products.find(p => p.id === i.productId); if (p) p.stock = money(p.stock + i.quantity); });
+      t.returnHistory = [...(t.returnHistory || []), record]; t.refundedAmount = money((t.refundedAmount || 0) + totalRefundAmount);
+      t.status = t.items.every(i => t.returnHistory!.flatMap(r => r.returnedItems).filter(r => r.productId === i.product.id).reduce((a, r) => a + r.quantity, 0) >= i.quantity) ? "REFUNDED" : "PARTIALLY_RETURNED";
+      s.returnRecords.unshift(record); audit(s, "ITEM_RETURNED", t.receiptNumber + ": refunded ₱" + totalRefundAmount.toFixed(2) + ". " + params.reason); return record;
+    }); return { success: true, returnRecord }; } catch (e) { return { success: false, error: (e as Error).message }; }
+  };
+  const addCustomer = (data: Omit<Customer, "id" | "createdAt" | "totalDebt">) => commit(s => { requirePermission("canProcessSales"); assert(data.name.trim(), "Enter a customer name."); nonnegative(data.creditLimit, "Credit limit"); const c = { ...data, id: id("customer"), totalDebt: 0, createdAt: now() }; s.customers.unshift(c); return c; });
+  const updateCustomer = (cid: string, updates: Partial<Customer>) => safely(s => { requirePermission("canProcessSales"); const c = s.customers.find(c => c.id === cid); assert(c, "Customer not found."); Object.assign(c, updates, { id: cid, totalDebt: c.totalDebt }); nonnegative(c.creditLimit, "Credit limit"); });
+  const changeDebt = (cid: string, amount: number, payment: boolean, method: "CASH" | "GCASH", notes = "") => commit(s => {
+    requirePermission("canProcessSales"); positive(amount, "Amount"); const c = s.customers.find(c => c.id === cid); assert(c, "Customer not found.");
+    assert(payment ? amount <= c.totalDebt : money(c.totalDebt + amount) <= c.creditLimit, payment ? "Payment exceeds the outstanding balance." : "Customer credit limit exceeded.");
+    if (payment && method === "CASH") { assert(s.cashDrawer.status === "OPEN", "Open a cash shift before collecting cash."); s.cashDrawer.cashIn = money(s.cashDrawer.cashIn + amount); s.cashDrawer.expectedCash = money(s.cashDrawer.expectedCash + amount); }
+    c.totalDebt = money(c.totalDebt + (payment ? -amount : amount));
+    s.debtEntries.unshift({ id: id("debt"), customerId: cid, customerName: c.name, type: payment ? "PAYMENT_RECEIVED" : "DEBT_INCREASE", amount, balanceAfter: c.totalDebt, notes: notes || (payment ? "Payment via " + method : "Manual credit"), date: now(), recordedBy: s.currentStaff.name });
+    audit(s, "SETTINGS_CHANGED", c.name + ": " + (payment ? "payment" : "credit") + " ₱" + amount.toFixed(2));
+  });
+  const recordDebtPayment = (cid: string, amount: number, method: "CASH" | "GCASH", notes?: string) => changeDebt(cid, amount, true, method, notes);
+  const addManualDebt = (cid: string, amount: number, notes: string) => changeDebt(cid, amount, false, "CASH", notes);
+  function expense(s: StoreData, data: Omit<Expense, "id" | "date" | "recordedBy">) {
+    positive(data.amount, "Expense"); assert(data.description.trim(), "Describe the expense.");
+    if (data.paymentMethod === "CASH") { assert(s.cashDrawer.status === "OPEN", "Open a cash shift before recording a cash expense."); s.cashDrawer.cashOut = money(s.cashDrawer.cashOut + data.amount); s.cashDrawer.expectedCash = money(s.cashDrawer.expectedCash - data.amount); }
+    const e = { ...data, id: id("expense"), date: now(), recordedBy: s.currentStaff.name }; s.expenses.unshift(e); return e;
+  }
+  const addExpense = (data: Omit<Expense, "id" | "date" | "recordedBy">) => commit(s => { requirePermission("canProcessSales"); const e = expense(s, data); audit(s, "SETTINGS_CHANGED", "Expense: " + e.description + " ₱" + e.amount); return e; });
+  const receiveStock = (data: Omit<StockReceipt, "id" | "date" | "total">) => commit(s => {
+    requirePermission("canManageInventory"); assert(data.supplier.trim() && data.lines.length, "Enter a supplier and at least one item.");
+    const seen = new Set<string>(); let total = 0;
+    data.lines.forEach(line => { assert(!seen.has(line.productId), "Duplicate receiving line."); seen.add(line.productId); positive(line.quantity, "Quantity"); nonnegative(line.cost, "Unit cost"); const p = s.products.find(p => p.id === line.productId); assert(p?.isActive, "Product no longer available.");
+      p.costPrice = money((p.stock * p.costPrice + line.quantity * line.cost) / (p.stock + line.quantity)); p.stock = money(p.stock + line.quantity); p.updatedAt = now(); total = money(total + line.quantity * line.cost);
+    });
+    const receipt = { ...data, id: id("purchase"), date: now(), total }; s.stockReceipts.unshift(receipt);
+    if (total > 0) expense(s, { category: "Supplier & Stock Restock", amount: total, description: "Stock received from " + data.supplier, paymentMethod: data.paymentMethod, receiptRef: data.reference });
+    audit(s, "STOCK_ADJUSTED", "Received " + data.lines.length + " products from " + data.supplier + ": ₱" + total); return receipt;
+  });
+  const openCashDrawer = (openingAmount: number, notes?: string) => safely(s => { requirePermission("canProcessSales"); assert(s.cashDrawer.status === "CLOSED", "A shift is already open."); nonnegative(openingAmount, "Opening float"); s.cashDrawer = { id: id("shift"), openedAt: now(), openedBy: s.currentStaff.name, openingCash: openingAmount, startingFloat: openingAmount, cashSales: 0, cashIn: 0, cashOut: 0, expectedCash: openingAmount, status: "OPEN", notes }; audit(s, "SETTINGS_CHANGED", "Opened shift with ₱" + openingAmount); });
+  const closeCashDrawer = (actualCash: number, notes?: string) => safely(s => { requirePermission("canProcessSales"); assert(s.cashDrawer.status === "OPEN", "Shift is already closed."); nonnegative(actualCash, "Counted cash"); Object.assign(s.cashDrawer, { status: "CLOSED", closedAt: now(), closedBy: s.currentStaff.name, actualCash, discrepancy: money(actualCash - s.cashDrawer.expectedCash), notes }); s.shiftHistory.unshift({ ...s.cashDrawer }); audit(s, "SETTINGS_CHANGED", "Closed shift; variance ₱" + s.cashDrawer.discrepancy); });
+  const logCashAdjustment = (amount: number, type: "IN" | "OUT", reason: string) => safely(s => { requirePermission("canProcessSales"); assert(s.cashDrawer.status === "OPEN", "Open a shift first."); positive(amount, "Amount"); assert(reason.trim(), "Enter a reason."); s.cashDrawer[type === "IN" ? "cashIn" : "cashOut"] += amount; s.cashDrawer.expectedCash = money(s.cashDrawer.expectedCash + (type === "IN" ? amount : -amount)); audit(s, "SETTINGS_CHANGED", "Cash " + type + ": ₱" + amount + ". " + reason); });
+  const updateSettings = (updates: Partial<StoreSettings>) => safely(s => { requirePermission("canManageSettings"); Object.assign(s.settings, updates); audit(s, "SETTINGS_CHANGED", "Store settings updated"); });
+  const verifyOwnerPin = (pin: string) => { const owner = ref.current.staffList.find(s => s.role === "OWNER" && s.isActive); const valid = !!owner && pin.trim() === (ref.current.settings.ownerPin || owner.pin); if (valid) ownerApproval.current = Date.now() + 60_000; return valid; };
+  const addStaff = (data: Omit<StaffUser, "id" | "createdAt">) => commit(s => { requirePermission("canManageUsers"); assert(/^\d{4}$/.test(data.pin), "Use a four-digit PIN."); const staff = { ...data, id: id("staff"), createdAt: now() }; s.staffList.push(staff); audit(s, "USER_CREATED", "Added " + staff.name); return staff; });
+  const updateStaff = (sid: string, updates: Partial<StaffUser>) => safely(s => { requirePermission("canManageUsers"); const staff = s.staffList.find(u => u.id === sid); assert(staff, "Staff not found."); Object.assign(staff, updates, { id: sid }); assert(s.staffList.some(u => u.isActive && u.role === "OWNER"), "Keep at least one active owner."); if (staff.id === s.currentStaff.id) s.currentStaff = { ...staff }; audit(s, "USER_UPDATED", "Updated " + staff.name); });
+  const deleteStaff = (sid: string) => updateStaff(sid, { isActive: false });
+  const toggleStaffActive = (sid: string) => updateStaff(sid, { isActive: !ref.current.staffList.find(s => s.id === sid)?.isActive });
+  function startSession(staff: StaffUser) { ownerApproval.current = 0; apply({ ...ref.current, currentStaff: staff }); sessionStorage.setItem("PADDL_SESSION", JSON.stringify({ staffId: staff.id })); setAuthenticated(true); }
+  const loginWithPin = (sid: string, pin: string) => { const staff = ref.current.staffList.find(s => s.id === sid && s.isActive); if (!staff || staff.pin !== pin.trim()) return { success: false, error: "Incorrect PIN or inactive staff account." }; startSession(staff); return { success: true }; };
+  const switchStaff = (_sid: string) => { toast.info("Use Switch staff and enter that staff member's PIN."); };
+  const quickDemoLogin = (role: UserRole) => { const staff = ref.current.staffList.find(s => s.role === role && s.isActive); if (staff) startSession(staff); };
+  const loginWithEmail = async (email: string, password: string) => {
+    if (!supabase) return { error: "Cloud is not configured. Use a demo or staff PIN." };
+    setAuthLoading(true);
+    try { const { data, error } = await supabase.auth.signInWithPassword({ email, password }); if (error) throw error; setSessionUser(data.user); return {}; }
+    catch (e) { return { error: (e as Error).message }; } finally { setAuthLoading(false); }
+  };
+  const registerStoreAccount = async (email: string, password: string, storeName?: string) => {
+    if (!supabase) return { error: "Cloud is not configured." }; setAuthLoading(true);
+    try { const { error } = await supabase.auth.signUp({ email, password, options: { data: { store_name: storeName } } }); if (error) throw error; return { success: true }; } catch (e) { return { error: (e as Error).message }; } finally { setAuthLoading(false); }
+  };
+  const logout = async () => { await supabase?.auth.signOut(); setSessionUser(null); setAuthenticated(false); sessionStorage.removeItem("PADDL_SESSION"); ownerApproval.current = 0; };
+  const loadShopPreset = (key: PresetKey) => {
+    try {
+      assert(!syncing.current, "Wait for the cloud backup to finish before switching workspaces.");
+      assert(key in ALL_SHOP_PRESETS, "Unknown industry."); localStorage.setItem(PREFIX + ref.current.currentShopPreset, JSON.stringify(ref.current));
+      const saved = localStorage.getItem(PREFIX + key); const next = saved ? JSON.parse(saved) : seed(key); validateBackup(next);
+      localStorage.setItem(ACTIVE, key); apply(next); cloudRevision.current = null; cloudKey.current = null; syncedLocalRevision.current = -1; setLastSyncedAt(null); setSyncError(null); ownerApproval.current = 0;
+    } catch (e) { toast.error((e as Error).message); }
+  };
+  const exportDataJson = () => JSON.stringify({ ...ref.current, schemaVersion: 4, exportedAt: now() }, null, 2);
+  const importDataJson = (json: string) => {
+    try { requirePermission("canManageSettings"); const data = JSON.parse(json); validateBackup(data); assert(data.currentShopPreset === ref.current.currentShopPreset, "Switch to the backup's industry before restoring.");
+      localStorage.setItem("PADDL_RECOVERY_" + Date.now(), JSON.stringify(ref.current)); data.revision = ref.current.revision + 1; localStorage.setItem(PREFIX + data.currentShopPreset, JSON.stringify(data)); apply(data); ownerApproval.current = 0; return true;
+    } catch (e) { toast.error((e as Error).message); return false; }
+  };
+  const resetToDemoData = () => { try { requirePermission("canManageSettings"); localStorage.setItem("PADDL_RECOVERY_" + Date.now(), JSON.stringify(ref.current)); const next = seed(ref.current.currentShopPreset); next.revision = ref.current.revision + 1; localStorage.setItem(PREFIX + next.currentShopPreset, JSON.stringify(next)); apply(next); } catch (e) { toast.error((e as Error).message); } };
+  const syncCloud = async () => {
+    if (syncing.current) return;
+    if (!supabase || !sessionUser) { toast.info("Saved on this device. Sign in to cloud in Settings to back it up."); return; }
+    if (!navigator.onLine) { toast.info("You are offline. Changes remain saved on this device."); return; }
+    syncing.current = true; setSyncing(true); setSyncError(null);
+    const snapshot = structuredClone(ref.current); const key = sessionUser.id + ":" + snapshot.currentShopPreset;
+    try {
+      if (cloudKey.current !== key) {
+        const { data, error } = await supabase.from("paddl_backups").select("revision").eq("owner_id", sessionUser.id).eq("workspace", snapshot.currentShopPreset).maybeSingle(); if (error) throw error;
+        assert(!data, "A cloud backup already exists. Restore it in Settings before saving from this device to avoid overwriting another device's work.");
+        cloudRevision.current = 0; cloudKey.current = key;
+      }
+      const { data, error } = await supabase.rpc("save_paddl_backup", { p_workspace: snapshot.currentShopPreset, p_expected_revision: cloudRevision.current, p_payload: snapshot });
+      if (error) throw error; cloudRevision.current = Number(data); syncedLocalRevision.current = snapshot.revision; setLastSyncedAt(now()); toast.success("Cloud backup saved.");
+    } catch (e) { const message = (e as Error).message || "Cloud backup failed."; setSyncError(message); toast.error(message); }
+    finally { syncing.current = false; setSyncing(false); }
+  };
+  const restoreCloud = async () => {
+    if (!supabase || !sessionUser) { toast.error("Sign in to cloud first."); return; }
+    const key = ref.current.currentShopPreset;
+    const localRevision = ref.current.revision;
+    try { requirePermission("canManageSettings"); const { data, error } = await supabase.from("paddl_backups").select("revision,payload").eq("owner_id", sessionUser.id).eq("workspace", key).single(); if (error) throw error;
+      assert(ref.current.currentShopPreset === key && ref.current.revision === localRevision, "Workspace changed while downloading. Try again."); validateBackup(data.payload);
+      if (importDataJson(JSON.stringify(data.payload))) { cloudRevision.current = data.revision; cloudKey.current = sessionUser.id + ":" + key; syncedLocalRevision.current = ref.current.revision; setLastSyncedAt(now()); setSyncError(null); toast.success("Cloud backup restored. A recovery copy of this device was saved."); }
+    } catch (e) { toast.error((e as Error).message); }
+  };
+  const setCart = (items: CartItem[] | ((previous: CartItem[]) => CartItem[])) => safely(s => { s.cart = typeof items === "function" ? items(s.cart) : items; });
+  const holdCart = (name: string) => safely(s => { assert(s.cart.length, "Add items first."); s.heldCarts.unshift({ id: id("cart"), name: name.trim() || "Order " + (s.heldCarts.length + 1), items: s.cart, createdAt: now() }); s.cart = []; });
+  const resumeCart = (cid: string) => safely(s => { assert(s.cart.length === 0, "Hold or clear the current cart first."); const held = s.heldCarts.find(c => c.id === cid); assert(held, "Held order not found."); s.cart = held.items; s.heldCarts = s.heldCarts.filter(c => c.id !== cid); });
+  const pendingSyncCount = Math.max(0, state.revision - syncedLocalRevision.current);
+  const syncStatus = !isOnline ? "offline" : isSyncing ? "syncing" : syncError ? "error" : lastSyncedAt && pendingSyncCount === 0 ? "synced" : "local";
+  return { ...state, mounted, isOnline, isAuthenticated, isAuthLoading, isSyncing, syncStatus, syncError, lastSyncedAt, pendingSyncCount, isSupabaseActive: isSupabaseConfigured(), sessionUser,
+    addProduct, updateProduct, deleteProduct, adjustProductStock, processCheckout, voidTransaction, processReturn, addCustomer, updateCustomer, recordDebtPayment, addManualDebt, addExpense, receiveStock, openCashDrawer, closeCashDrawer, logCashAdjustment,
+    logAuditEvent, addStaff, updateStaff, deleteStaff, toggleStaffActive, switchStaff, hasPermission, verifyOwnerPin, updateSettings, setFontSizeMode: (fontSizeMode: "NORMAL" | "LARGE") => safely(s => { s.settings.fontSizeMode = fontSizeMode; }), toggleProductBestseller: (pid: string) => updateProduct(pid, { isBestseller: !ref.current.products.find(p => p.id === pid)?.isBestseller }),
+    loginWithPin, loginWithEmail, registerStoreAccount, logout, quickDemoLogin, signInWithEmail: loginWithEmail, signOut: logout, loadShopPreset, syncCloud, restoreCloud, exportDataJson, importDataJson, resetToDemoData, setCart, holdCart, resumeCart };
 }
+const StoreContext = createContext<ReturnType<typeof useStoreState> | undefined>(undefined);
+export function StoreProvider({ children }: { children: React.ReactNode }) { const store = useStoreState(); return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>; }
+export function useStore() { const value = useContext(StoreContext); if (!value) throw new Error("useStore needs StoreProvider"); return value; }

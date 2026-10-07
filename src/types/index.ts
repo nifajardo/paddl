@@ -113,6 +113,7 @@ export interface ReturnItem {
 }
 
 export interface ReturnRecord {
+  restocked?: boolean;
   id: string;
   transactionId: string;
   originalTransactionId?: string;
@@ -128,6 +129,7 @@ export interface ReturnRecord {
 }
 
 export interface Transaction {
+  requestId?: string;
   id: string;
   receiptNumber: string;
   items: CartItem[];
@@ -176,7 +178,7 @@ export interface DebtEntry {
   customerId: string;
   customerName: string;
   transactionId?: string;
-  type: "DEBT_INCREASE" | "PAYMENT_RECEIVED";
+  type: "DEBT_INCREASE" | "PAYMENT_RECEIVED" | "DEBT_ADJUSTMENT";
   amount: number;
   balanceAfter: number;
   notes?: string;

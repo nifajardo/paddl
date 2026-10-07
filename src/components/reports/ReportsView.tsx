@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import { useStore } from "@/context/StoreContext";
+import { businessDate, retainedCost, netSale } from "@/lib/commerce";
 import { Transaction, Product } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -108,7 +109,7 @@ export function ReportsView() {
     const txns = transactions.filter((t) => {
       // Exact date filter overrides preset if set
       if (exactDateSearch) {
-        return t.createdAt.startsWith(exactDateSearch);
+        return businessDate(t.createdAt) === exactDateSearch;
       }
 
       const tTime = new Date(t.createdAt).getTime();
@@ -130,7 +131,7 @@ export function ReportsView() {
 
     const exps = expenses.filter((e) => {
       if (exactDateSearch) {
-        return e.date.startsWith(exactDateSearch);
+        return businessDate(e.date) === exactDateSearch;
       }
 
       const eTime = new Date(e.date).getTime();
@@ -178,21 +179,13 @@ export function ReportsView() {
   const netSales = Math.max(0, grossSales - totalRefunds);
 
   // Cost of Goods Sold (COGS)
-  const cogs = useMemo(() => {
-    return validFinancialTxns.reduce((sum, t) => {
-      const txnCost = t.items.reduce((iSum, item) => {
-        const prod = products.find((p) => p.id === item.product.id) || item.product;
-        return iSum + (prod.costPrice || 0) * item.quantity;
-      }, 0);
-      return sum + txnCost;
-    }, 0);
-  }, [validFinancialTxns, products]);
+  const cogs = useMemo(() => validFinancialTxns.reduce((sum, txn) => sum + retainedCost(txn), 0), [validFinancialTxns]);
 
   const grossProfit = netSales - cogs;
   const grossMarginPercent = netSales > 0 ? ((grossProfit / netSales) * 100).toFixed(1) : "0.0";
 
   const totalOperatingExpenses = useMemo(() => {
-    return filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+    return filteredExpenses.filter(e => e.category !== "Supplier & Stock Restock" && e.category !== "Personal Drawings").reduce((sum, e) => sum + e.amount, 0);
   }, [filteredExpenses]);
 
   const netProfit = grossProfit - totalOperatingExpenses;
@@ -202,7 +195,11 @@ export function ReportsView() {
   const paymentBreakdown = useMemo(() => {
     const map: Record<string, number> = { CASH: 0, GCASH: 0, MAYA: 0, SPLIT: 0, CREDIT_UTANG: 0 };
     validFinancialTxns.forEach((t) => {
-      map[t.paymentMethod] = (map[t.paymentMethod] || 0) + t.total;
+      if (t.paymentMethod === "SPLIT" && t.splitDetail) {
+        const ratio = t.total ? netSale(t) / t.total : 0;
+        map.CASH += t.splitDetail.cashAmount * ratio;
+        map[t.splitDetail.digitalMethod] = (map[t.splitDetail.digitalMethod] || 0) + t.splitDetail.digitalAmount * ratio;
+      } else map[t.paymentMethod] = (map[t.paymentMethod] || 0) + netSale(t);
     });
     return map;
   }, [validFinancialTxns]);
@@ -215,8 +212,9 @@ export function ReportsView() {
         if (!itemMap[item.product.id]) {
           itemMap[item.product.id] = { product: item.product, qty: 0, revenue: 0 };
         }
-        itemMap[item.product.id].qty += item.quantity;
-        itemMap[item.product.id].revenue += item.subtotal;
+        const returned = (t.returnHistory || []).flatMap(r => r.returnedItems).filter(r => r.productId === item.product.id).reduce((sum, r) => sum + r.quantity, 0);
+        itemMap[item.product.id].qty += item.quantity - returned;
+        itemMap[item.product.id].revenue += item.subtotal * (t.subtotal ? netSale(t) / t.subtotal : 0);
       });
     });
 

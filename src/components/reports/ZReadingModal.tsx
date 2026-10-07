@@ -56,7 +56,7 @@ export function ZReadingModal({
     hour12: true,
   });
 
-  const netSales = grossSales - totalDiscount;
+  const netSales = transactions.filter(t => !["VOID", "VOIDED"].includes(t.status)).reduce((sum, t) => sum + t.total - (t.refundedAmount || 0), 0);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -65,11 +65,11 @@ export function ZReadingModal({
           <div className="flex items-center justify-between">
             <DialogTitle className="text-base font-bold flex items-center gap-2">
               <Printer className="h-5 w-5 text-indigo-600" />
-              Daily Z-Reading Audit Slip
+              Sales summary
             </DialogTitle>
           </div>
           <p className="text-xs text-slate-500">
-            End-of-day official ledger slip formatted for 58mm POS thermal printers.
+            Management summary for the selected sales period. Not a fiscal Z-reading.
           </p>
         </DialogHeader>
 
@@ -101,7 +101,7 @@ export function ZReadingModal({
               <span className="font-bold">₱{grossSales.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-slate-600">
-              <span>Senior/PWD 20% &amp; Discounts:</span>
+              <span>Demo discount &amp; Discounts:</span>
               <span>-₱{totalDiscount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between font-bold text-xs pt-0.5 border-t border-slate-200">

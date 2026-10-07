@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Undo2, AlertTriangle, CheckCircle2, Lock, Plus, Minus } from "lucide-react";
 import { toast } from "sonner";
+import { calculateReturn } from "@/lib/commerce";
 import { sound } from "@/lib/sounds";
 
 interface ReturnRefundModalProps {
@@ -45,6 +46,7 @@ export function ReturnRefundModal({
   const [pinError, setPinError] = useState("");
   const [isConfirmStep, setIsConfirmStep] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [restock, setRestock] = useState(false);
 
   // Calculate previously returned quantities for each item
   const previouslyReturnedMap = useMemo(() => {
@@ -91,17 +93,11 @@ export function ReturnRefundModal({
   };
 
   // Compute calculated refund amount
-  const computedRefundTotal = useMemo(() => {
-    let sum = 0;
-    transaction.items.forEach((item) => {
-      const retQty = returnQuantities[item.product.id] || 0;
-      if (retQty > 0) {
-        const effectiveUnitPrice = item.subtotal / item.quantity;
-        sum += effectiveUnitPrice * retQty;
-      }
-    });
-    return Math.round(sum * 100) / 100;
-  }, [transaction, returnQuantities]);
+  const computedRefundTotal = (() => {
+    const requested = Object.entries(returnQuantities).filter(([, quantity]) => quantity > 0).map(([productId, quantity]) => ({ productId, quantity }));
+    if (!requested.length) return 0;
+    try { return calculateReturn(transaction, requested).reduce((sum, item) => sum + item.refundAmount, 0); } catch { return 0; }
+  })();
 
   const totalItemsToReturn = Object.values(returnQuantities).reduce((a, b) => a + b, 0);
 
@@ -144,6 +140,7 @@ export function ReturnRefundModal({
       const result = processReturn({
         transactionId: transaction.id,
         returnedItems: itemsPayload,
+        restock,
         reason: finalReason,
         notes: notes.trim() || undefined,
       });
@@ -290,7 +287,7 @@ export function ReturnRefundModal({
                   Items to Return: {totalItemsToReturn} unit(s)
                 </span>
                 <span className="text-[11px] text-indigo-700">
-                  Stock will be added back to inventory immediately
+                  {restock ? "Sellable items will return to inventory" : "Items will stay out of sellable inventory"}
                 </span>
               </div>
               <div className="text-right">
@@ -331,6 +328,7 @@ export function ReturnRefundModal({
 
             {/* Optional Notes */}
             <div className="space-y-1">
+              <label className="flex items-start gap-2 mb-4 text-xs"><input type="checkbox" checked={restock} onChange={e => setRestock(e.target.checked)} /> Return these items to sellable stock (only if undamaged and unexpired)</label>
               <Label className="text-xs font-semibold text-slate-700">Audit Notes (Optional)</Label>
               <Input
                 placeholder="e.g. Customer brought physical receipt, items inspected in good order..."

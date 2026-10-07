@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Banknote, QrCode, BookOpen, Clock, AlertTriangle, UserCheck, ShieldCheck, Copy, Check, Layers, CreditCard, Smartphone } from "lucide-react";
-import confetti from "canvas-confetti";
+
 import { toast } from "sonner";
 
 interface CheckoutModalProps {
@@ -19,6 +19,7 @@ interface CheckoutModalProps {
   subtotal: number;
   customers: Customer[];
   onCompleteCheckout: (data: {
+    requestId?: string;
     items: CartItem[];
     subtotal: number;
     discountType: "NONE" | "SENIOR_PWD_20" | "CUSTOM";
@@ -46,6 +47,7 @@ export function CheckoutModal({
   onCompleteCheckout,
 }: CheckoutModalProps) {
   const { settings } = useStore();
+  const [requestId] = useState(() => crypto.randomUUID());
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
   const [discountType, setDiscountType] = useState<"NONE" | "SENIOR_PWD_20" | "CUSTOM">("NONE");
   const [customDiscount, setCustomDiscount] = useState<number>(0);
@@ -132,13 +134,13 @@ export function CheckoutModal({
       return true;
     }
     if (paymentMethod === "SPLIT") {
-      return splitTotalTendered >= finalTotal && parsedSplitDigital > 0;
+      return parsedSplitCash >= 0 && splitTotalTendered >= finalTotal && parsedSplitDigital > 0 && parsedSplitDigital <= finalTotal;
     }
     if (paymentMethod === "CREDIT_UTANG") {
-      return Boolean(selectedCustomerId);
+      return Boolean(selectedCustomerId) && Boolean(selectedCustomer && selectedCustomer.totalDebt + finalTotal <= selectedCustomer.creditLimit);
     }
     return true;
-  }, [cart, paymentMethod, parsedTender, finalTotal, selectedCustomerId, splitTotalTendered, parsedSplitDigital]);
+  }, [cart, paymentMethod, parsedTender, finalTotal, selectedCustomerId, selectedCustomer, splitTotalTendered, parsedSplitDigital, parsedSplitCash]);
 
   const handleQuickCash = (amount: number) => {
     setTenderAmount(amount.toString());
@@ -159,15 +161,7 @@ export function CheckoutModal({
     e.preventDefault();
     if (!isFormValid) return;
 
-    try {
-      confetti({
-        particleCount: 40,
-        spread: 60,
-        origin: { y: 0.8 },
-      });
-    } catch {
-      // ignore
-    }
+
 
     const isSplit = paymentMethod === "SPLIT";
     const tendered = isSplit
@@ -183,6 +177,7 @@ export function CheckoutModal({
       : 0;
 
     onCompleteCheckout({
+      requestId,
       items: cart,
       subtotal,
       discountType,
@@ -253,7 +248,7 @@ export function CheckoutModal({
                 className="text-xs h-8 bg-blue-700 text-white hover:bg-blue-800"
                 onClick={() => setDiscountType("SENIOR_PWD_20")}
               >
-                Senior / PWD 20%
+                20% demo discount
               </Button>
               <Button
                 type="button"

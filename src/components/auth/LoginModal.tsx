@@ -32,7 +32,7 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
   const { 
     staffList, 
     currentStaff, 
-    switchStaff, 
+    loginWithPin,
     signInWithEmail, 
     isAuthLoading, 
     sessionUser, 
@@ -78,8 +78,8 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
     const targetStaff = staffList.find((s) => s.id === selectedStaffId);
     if (!targetStaff) return;
 
-    if (targetStaff.pin === enteredPin.trim()) {
-      switchStaff(targetStaff.id);
+    const result = loginWithPin(targetStaff.id, enteredPin);
+    if (result.success) {
       toast.success(`Switched active user to ${targetStaff.name} (${targetStaff.role})`);
       setEnteredPin("");
       onClose();
@@ -114,16 +114,16 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
             <Zap className={`h-4 w-4 ${isSupabaseActive ? "text-emerald-500" : "text-blue-500"}`} />
             <div>
               <span className="font-bold text-slate-900">
-                {isSupabaseActive ? "Supabase Cloud Database" : "Offline Local Storage Engine"}
+                {isSupabaseActive ? "Cloud backup available" : "Device workspace"}
               </span>
               <p className="text-[10px] text-slate-400 font-mono">
-                {isSupabaseActive ? "fwzzsktptgxtzquxhfrf.supabase.co" : "Synced locally in browser"}
+                {sessionUser ? "Cloud account signed in" : "Local demo staff access"}
               </p>
             </div>
           </div>
 
           <Badge variant="outline" className={`text-[10px] ${isSupabaseActive ? "border-emerald-300 text-emerald-700 bg-emerald-50" : "border-blue-300 text-blue-700 bg-blue-50"}`}>
-            {isSupabaseActive ? "Connected" : "Local Standalone"}
+            {sessionUser ? "Signed in" : "Device only"}
           </Badge>
         </div>
 
