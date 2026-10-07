@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef } from "react";
+import { printDocument } from "@/lib/printing";
 import { Transaction, StoreSettings } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -28,8 +29,7 @@ export function ReceiptModal({
   if (!isOpen || !transaction) return null;
 
   const handlePrint = () => {
-    // Add print class to body temporarily or trigger browser print
-    window.print();
+    printDocument("#printable-receipt", `Receipt ${transaction.receiptNumber}`);
   };
 
   const handleCopyText = () => {
@@ -59,7 +59,7 @@ Subtotal:       ₱${transaction.subtotal.toFixed(2)}
 ${
   transaction.discountAmount > 0
     ? `Discount:       -₱${transaction.discountAmount.toFixed(2)} (${
-        transaction.discountType === "SENIOR_PWD_20" ? "20% demo discount" : "Promo"
+        transaction.discountType === "SENIOR_PWD_20" ? "20% discount" : "Promo"
       })\n`
     : ""
 }${
@@ -204,9 +204,9 @@ ${settings.receiptFooterMessage}
             </div>
             {transaction.items.map((item, idx) => (
               <div key={idx} className="space-y-0.5">
-                <div className="flex justify-between font-medium">
-                  <span className="truncate max-w-[200px]">{item.product.name}</span>
-                  <span className="font-mono">₱{item.subtotal.toFixed(2)}</span>
+                <div className="receipt-item-row grid grid-cols-[minmax(0,1fr)_max-content] gap-2 font-medium">
+                  <span className="receipt-item-name min-w-0 whitespace-normal break-words">{item.product.name}</span>
+                  <span className="receipt-item-amount font-mono whitespace-nowrap">₱{item.subtotal.toFixed(2)}</span>
                 </div>
                 <div className="text-[10px] text-slate-500 flex justify-between">
                   <span>
@@ -230,7 +230,7 @@ ${settings.receiptFooterMessage}
             {transaction.discountAmount > 0 && (
               <div className="flex justify-between text-emerald-600 font-medium">
                 <span>
-                  Discount ({transaction.discountType === "SENIOR_PWD_20" ? "20% demo discount" : "Promo"}):
+                  Discount ({transaction.discountType === "SENIOR_PWD_20" ? "20% discount" : "Promo"}):
                 </span>
                 <span className="font-mono">-₱{transaction.discountAmount.toFixed(2)}</span>
               </div>

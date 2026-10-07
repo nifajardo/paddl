@@ -1,4 +1,4 @@
-import { Product, Customer, Expense, Transaction, StaffUser, StoreSettings, CashDrawerShift, DebtEntry, AuditLogEntry, ReturnRecord } from "@/types";
+import type { Product, Customer, Expense, Transaction, StaffUser, StoreSettings, CashDrawerShift, DebtEntry, AuditLogEntry, ReturnRecord } from "@/types";
 
 export const INITIAL_STAFF: StaffUser[] = [
   { 

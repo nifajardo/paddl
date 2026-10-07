@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { printDocument } from "@/lib/printing";
 import { StoreSettings, CashDrawerShift, Transaction, Expense } from "@/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,7 @@ export function ZReadingModal({
   if (!isOpen) return null;
 
   const handlePrint = () => {
-    window.print();
+    printDocument("#printable-sales-summary", `${settings.storeName} — Sales summary`);
   };
 
   const currentDate = new Date().toLocaleDateString("en-PH", {
@@ -74,7 +75,7 @@ export function ZReadingModal({
         </DialogHeader>
 
         {/* 58mm Thermal Receipt Printable Simulation */}
-        <div className="print-receipt bg-amber-50/20 border border-slate-300 rounded-xl p-5 font-mono text-xs text-slate-800 shadow-inner space-y-3">
+        <div id="printable-sales-summary" className="print-receipt bg-amber-50/20 border border-slate-300 rounded-xl p-5 font-mono text-xs text-slate-800 shadow-inner space-y-3">
           {/* Header */}
           <div className="text-center space-y-0.5 border-b border-dashed border-slate-400 pb-3">
             <h2 className="font-extrabold text-sm uppercase text-slate-900">{settings.storeName}</h2>
@@ -182,7 +183,7 @@ export function ZReadingModal({
               <div className="border-t border-slate-400 w-28 pt-1">Owner Signature</div>
             </div>
             <div className="text-[9px] text-slate-400">
-              Powered by Paddl Plus • Idempotent Audit Engine
+            Paddl · Management summary
             </div>
           </div>
         </div>
@@ -196,7 +197,7 @@ export function ZReadingModal({
             onClick={handlePrint}
             className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs h-9"
           >
-            <Printer className="h-4 w-4 mr-1.5" /> Print Z-Reading (58mm)
+            <Printer className="h-4 w-4 mr-1.5" /> Print sales summary
           </Button>
         </DialogFooter>
       </DialogContent>

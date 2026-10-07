@@ -18,6 +18,10 @@ Open [localhost:3000](http://localhost:3000). Select an industry to enter its de
 
 ## What works
 
+- Demo and Production modes with separate records, backups, staff sessions, and saved carts.
+- Production business setup with empty stock and balances; demo guides and sample reset hidden.
+- Standalone previews for sale/debt receipts, summaries, labels, and restock checklists.
+
 - Four independently saved demo workspaces: sari-sari, motor parts, pharmacy, and café.
 - Owner overview, mobile navigation, page search (Ctrl/Cmd+K), F1 register shortcut, industry walkthrough.
 - Persistent cart, named held orders, barcode input, cash/digital/split/credit checkout.
@@ -29,15 +33,25 @@ Open [localhost:3000](http://localhost:3000). Select an industry to enter its de
 
 The Peddlr research, evidence, audience, and remaining product work are in [docs/product-research.md](docs/product-research.md).
 
+## Using the modes and printing
+
+Use the mode button in the header or sidebar to choose Demo Mode or Production Mode and an industry. Demo Mode retains sample records and industry guides. Production Mode keeps the same interface with demo promotions and reset controls hidden. First-use business setup collects a business name, owner name, a six-digit owner PIN, and optional receipt contact details. Existing businesses require staff PIN sign-in when opened from the mode selector. Add products in Inventory, receive stock, and open a shift in Cash & expenses before accepting cash sales.
+
+Production Mode is prepared for client testing on one device. Local staff PIN access and manual cloud backups retain the limitations below; server-enforced staff authorization and concurrent registers still require further backend work.
+
+All print buttons open a dedicated preview tab. Click **Print / Save PDF** there to open the browser's print dialog. If the tab is blocked, use **Open here** in the notification. Long receipt names wrap while prices retain a separate column, including earlier snapshots after refresh. Receipt previews use an 80mm layout; select the matching paper size and 100% scale in your printer settings. Label sheets use three columns; roll labels use one column. Barcode labels use Code 128 generated with [JsBarcode](https://github.com/lindell/JsBarcode).
+
+Print jobs are stored on the device for up to 24 hours; old snapshots are removed when another job is created. Exported business backups exclude print jobs.
+
 ## Data and migration
 
-Each industry uses a separate `PADDL_WORKSPACE_V4_<industry>` localStorage entry. On first load, the prior `PEDDLR_PRO_STORE_V3` workspace is migrated when present; that original entry remains untouched. Destructive restore/reset first creates a timestamped `PADDL_RECOVERY_<timestamp>` snapshot. Clearing browser data removes local work, so export regularly.
+Demo industries retain their `PADDL_WORKSPACE_V4_<industry>` localStorage entries. Production uses `PADDL_PRODUCTION_V1_<industry>` entries. On first demo load, the prior `PEDDLR_PRO_STORE_V3` workspace is migrated when present; that original entry remains untouched. Restoring a backup from another mode is rejected. Destructive restore/reset first creates a timestamped `PADDL_RECOVERY_<timestamp>` snapshot. Clearing browser data removes local work, so export regularly.
 
 Domain mutations validate a cloned state, persist that whole state synchronously, then update the UI. Failed saves cannot partially apply stock/debt/cash changes. Browser-tab revision checks detect a newer saved workspace, but this is a **single active register** design: localStorage does not provide a cross-tab transactional lock. Never use separate tabs/devices as concurrent live registers.
 
 ## Optional cloud backup
 
-1. Review and run `supabase/migrations/20261007_safe_backups.sql` in your Supabase SQL editor. `supabase/schema.sql` contains the same fresh-install schema.
+1. For a new install, review and run `supabase/schema.sql`. If the earlier backup migration is already installed, apply `supabase/migrations/20261008_workspace_modes.sql` to add separate Production workspace keys and validate mode identity. These files have not been applied automatically to a hosted database.
 2. Configure `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` using `.env.example`. Never use a service-role key in a public environment variable.
 3. Create/confirm an account through your Supabase auth administration, then connect it in the app's Settings.
 4. Choose Save cloud backup. Another device must explicitly restore the existing backup before attempting a save.

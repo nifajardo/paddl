@@ -204,6 +204,30 @@
 }
 
 /* Accessible Large Font Mode */
+.standalone-print-preview { min-height: 100dvh; background: #f1f5f4; display: flex; flex-direction: column; }
+.standalone-print-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px; background: white; border-bottom: 1px solid #d8e2dc; }
+.standalone-print-preview > header p { color: #596b61; font-size: 13px; margin-top: 4px; }
+.standalone-print-preview > header > div { min-width: 0; overflow-wrap: anywhere; }
+.standalone-print-preview > header button { border-radius: 8px; background: #087f65; color: white; padding: 12px 18px; font-size: 14px; cursor: pointer; flex-shrink: 0; }
+.standalone-print-preview > header button:disabled { opacity: .5; cursor: wait; }
+.standalone-print-preview iframe { width: 100%; height: calc(100dvh - 90px); border: none; flex: 1; }
+.print-preview-error { max-width: 600px; padding: 40px; margin: 30px auto; background: white; border-radius: 12px; }
+.print-preview-error a { display: block; margin-top: 20px; color: #087f65; }
+.production-pill { background: #e9f5ef; color: #126447; }
+.mode-select { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; background: white; }
+.mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.mode-option { display: flex; flex-direction: column; gap: 12px; text-align: left; padding: 20px; border: 1px solid #d6e3dd; border-radius: 12px; background: #f8fbf9; }
+.mode-option:hover { border-color: #09876b; background: #eff8f3; }
+.mode-option p { font-size: 13px; color: #53665d; flex: 1; }
+.mode-option span { color: #087f65; font-size: 13px; font-weight: 600; }
+.production-setup { max-width: 550px; margin: 0 auto; padding: 28px; background: white; border: 1px solid #dde5e1; border-radius: 16px; display: flex; flex-direction: column; gap: 18px; }
+.production-setup h1 { font-size: 28px; font-weight: 700; }
+.production-setup p { color: #586b62; }
+.production-setup label { display: flex; flex-direction: column; gap: 7px; font-size: 14px; font-weight: 600; }
+.production-setup small { font-weight: 400; color: #65786e; }
+.production-setup input { padding: 12px; border: 1px solid #cedad3; border-radius: 8px; width: 100%; }
+.setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 480px) { .mode-options { grid-template-columns: 1fr; } .production-setup { padding: 20px; } .welcome-header { gap: 12px; flex-wrap: wrap; } }
 .font-mode-large {
   font-size: 1.08rem;
 }

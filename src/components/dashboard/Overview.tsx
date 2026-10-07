@@ -36,6 +36,7 @@ export function Overview({
     settings,
     cashDrawer,
     currentShopPreset,
+    appMode,
   } = useStore();
   const [period, setPeriod] = useState<"today" | "week">("today");
   const [receipt, setReceipt] = useState<Transaction | null>(null);
@@ -458,7 +459,7 @@ export function Overview({
           )}
         </section>
       </div>
-      <div className="industry-banner">
+      {appMode === "DEMO" ? <div className="industry-banner">
         <span className="metric-icon green">
           <Sparkles size={22} />
         </span>
@@ -473,7 +474,7 @@ export function Overview({
         >
           <Truck size={16} /> Receive stock
         </button>
-      </div>
+      </div> : products.length === 0 && <div className="industry-banner"><Package size={24} /><div className="flex-1"><h3>Ready for your first sale</h3><p>Add your products, receive stock, and open your cash drawer to start.</p></div><button className="primary-button" onClick={() => onNavigate("inventory")}>Add products →</button></div>}
       {receipt && (
         <ReceiptModal
           transaction={receipt}

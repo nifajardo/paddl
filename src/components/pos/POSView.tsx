@@ -167,7 +167,7 @@ export function POSView() {
         if (barcodeBuffer.length >= 3) {
           const scannedCode = barcodeBuffer.trim();
           const matched = products.find(
-            (p) => p.isActive && p.barcode === scannedCode
+            (p) => p.isActive && (p.barcode === scannedCode || (!p.barcode && p.id === scannedCode))
           );
           if (matched) {
             addToCart(matched);

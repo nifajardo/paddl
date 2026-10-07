@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Lock, ShieldAlert, KeyRound, Delete, X } from "lucide-react";
 import { sound } from "@/lib/sounds";
 import { toast } from "sonner";
+import { useStore } from "@/context/StoreContext";
 
 interface PinPadModalProps {
   isOpen: boolean;
@@ -23,19 +24,20 @@ export function PinPadModal({
   targetFeatureName = "Store Financial Reports",
 }: PinPadModalProps) {
   const [pin, setPin] = useState("");
+  const { settings, staffList, appMode } = useStore();
+  const pinLength = (settings.ownerPin || staffList.find((staff) => staff.role === "OWNER" && staff.isActive)?.pin || "").length || 6;
   const [isError, setIsError] = useState(false);
 
   if (!isOpen) return null;
 
   const handleDigit = (digit: string) => {
     sound.click();
-    if (pin.length < 6) {
+    if (pin.length < pinLength) {
       const nextPin = pin + digit;
       setPin(nextPin);
       setIsError(false);
 
-      // Auto-verify if 4 digits
-      if (nextPin.length === 4) {
+      if (nextPin.length === pinLength) {
         if (verifyPin(nextPin)) {
           sound.chaChing();
           toast.success("Owner access authorized!");
@@ -72,7 +74,7 @@ export function PinPadModal({
     } else {
       sound.beep();
       setIsError(true);
-      toast.error("Incorrect Owner PIN. Default is 1234.");
+      toast.error("Incorrect owner PIN.");
     }
   };
 
@@ -93,7 +95,7 @@ export function PinPadModal({
 
         {/* PIN Indicators */}
         <div className="flex justify-center items-center gap-3 my-3">
-          {[0, 1, 2, 3].map((idx) => {
+          {Array.from({length: pinLength}, (_, index) => index).map((idx) => {
             const hasDigit = pin.length > idx;
             return (
               <div
@@ -112,7 +114,7 @@ export function PinPadModal({
 
         {isError && (
           <p className="text-[11px] text-rose-400 text-center font-medium animate-pulse">
-            Incorrect PIN. Default PIN is 1234
+            Incorrect owner PIN. Clear and try again.
           </p>
         )}
 
@@ -159,7 +161,7 @@ export function PinPadModal({
           >
             Cancel
           </button>
-          <span className="text-slate-500 font-mono text-[10px]">PIN default: 1234</span>
+          {appMode === "DEMO" && <span className="text-slate-500 font-mono text-[10px]">Demo PIN: 1234</span>}
         </div>
       </DialogContent>
     </Dialog>

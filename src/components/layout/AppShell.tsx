@@ -39,6 +39,7 @@ import { PinPadModal } from "./PinPadModal";
 import { LoginModal } from "@/components/auth/LoginModal";
 import { LoginScreen } from "@/components/auth/LoginScreen";
 import { PresetModal } from "./PresetModal";
+import { ModeSwitcher } from "./ModeSwitcher";
 import { industryGuides } from "@/data/industryGuides";
 import type { StaffPermissions } from "@/types";
 
@@ -81,10 +82,12 @@ export function AppShell() {
     verifyOwnerPin,
     hasPermission,
     logout,
+    appMode,
   } = store;
   const [activeTab, setTab] = useState<NavTab>("dashboard");
   const [mobileNav, setMobileNav] = useState(false);
   const [presetOpen, setPresetOpen] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
   const [staffOpen, setStaffOpen] = useState(false);
   const [pending, setPending] = useState<NavTab | null>(null);
   const [help, setHelp] = useState(false);
@@ -135,7 +138,7 @@ export function AppShell() {
         ? "dashboard"
         : "pos",
     );
-  }, [currentStaff.id, currentShopPreset]);
+  }, [currentStaff.id, currentShopPreset, appMode]);
   if (!mounted)
     return (
       <div className="h-dvh grid place-items-center bg-[#f5f7f6] text-emerald-800">
@@ -167,7 +170,12 @@ export function AppShell() {
           </span>
           <span className="brand-badge">FOR BUSINESS</span>
         </div>
-        <button className="store-switcher" onClick={() => setPresetOpen(true)}>
+        <button
+          className="store-switcher"
+          onClick={() =>
+            appMode === "DEMO" ? setPresetOpen(true) : navigate("settings")
+          }
+        >
           <span className="store-icon">
             <Store size={19} />
           </span>
@@ -197,17 +205,26 @@ export function AppShell() {
             </div>
           ))}
         </div>
-        <button className="demo-callout" onClick={() => setPresetOpen(true)}>
-          <Sparkles size={19} />
-          <div>
-            <strong>One app. Your kind of business.</strong>
-            <span>
-              Explore 4 industry demos <ArrowUpRight size={13} />
-            </span>
-          </div>
-        </button>
-        <button className="sidebar-help" onClick={() => setHelp((v) => !v)}>
-          <CircleHelp size={18} /> Your demo guide <ArrowUpRight size={14} />
+        {appMode === "DEMO" && (
+          <button className="demo-callout" onClick={() => setPresetOpen(true)}>
+            <Sparkles size={19} />
+            <div>
+              <strong>One app. Your kind of business.</strong>
+              <span>
+                Explore 4 industry demos <ArrowUpRight size={13} />
+              </span>
+            </div>
+          </button>
+        )}
+        {appMode === "DEMO" && (
+          <button className="sidebar-help" onClick={() => setHelp((v) => !v)}>
+            <CircleHelp size={18} /> Your demo guide <ArrowUpRight size={14} />
+          </button>
+        )}
+        <button className="sidebar-help" onClick={() => setModeOpen(true)}>
+          <Store size={18} />{" "}
+          {appMode === "DEMO" ? "Demo Mode" : "Production Mode"}
+          <ChevronDown size={14} />
         </button>
         <div className="sidebar-person">
           <button
@@ -277,8 +294,14 @@ export function AppShell() {
                       : "Saved on device"}
               </span>
             </button>
-            <button className="demo-pill" onClick={() => setPresetOpen(true)}>
-              <span /> Demo workspace
+            <button
+              className={
+                "demo-pill " +
+                (appMode === "PRODUCTION" ? "production-pill" : "")
+              }
+              onClick={() => setModeOpen(true)}
+            >
+              <span /> {appMode === "DEMO" ? "Demo Mode" : "Production Mode"}
             </button>
           </div>
         </header>
@@ -288,7 +311,7 @@ export function AppShell() {
             Cloud backup needs a connection.
           </div>
         )}
-        <main className="app-content" key={currentShopPreset}>
+        <main className="app-content" key={appMode + currentShopPreset}>
           {activeTab === "dashboard" && <Overview onNavigate={navigate} />}
           {activeTab === "pos" && <POSView />}
           {activeTab === "inventory" && <InventoryView />}
@@ -325,7 +348,7 @@ export function AppShell() {
           </button>
         </nav>
       </div>
-      {help && (
+      {help && appMode === "DEMO" && (
         <div className="guide-popover">
           <button
             className="absolute right-3 top-3 icon-button"
@@ -338,12 +361,7 @@ export function AppShell() {
           <h2>{guide.title}</h2>
           <p>Try these steps in your saved demo workspace.</p>
           {guide.steps.map((step, i) => (
-            <button
-              key={step}
-              onClick={() =>
-                navigate(guide.destinations[i])
-              }
-            >
+            <button key={step} onClick={() => navigate(guide.destinations[i])}>
               <span>{i + 1}</span>
               {step}
               <ChevronDown size={14} className="-rotate-90 ml-auto" />
@@ -412,6 +430,7 @@ export function AppShell() {
       {presetOpen && (
         <PresetModal isOpen onClose={() => setPresetOpen(false)} />
       )}
+      {modeOpen && <ModeSwitcher onClose={() => setModeOpen(false)} />}
     </div>
   );
 }

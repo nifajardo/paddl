@@ -1,4 +1,4 @@
-import { Product, Customer, Expense, Transaction, StoreSettings, CashDrawerShift, DebtEntry, ReturnRecord } from "@/types";
+import type { Product, Customer, Expense, Transaction, StoreSettings, CashDrawerShift, DebtEntry, ReturnRecord } from "@/types";
 
 export interface ShopPreset {
   id: "SARI_SARI" | "MOTOR_SHOP" | "PHARMACY" | "MILK_TEA";

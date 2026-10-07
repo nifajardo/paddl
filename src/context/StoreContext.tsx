@@ -38,6 +38,13 @@ import {
   type CheckoutInput,
 } from "@/lib/commerce";
 import { toast } from "sonner";
+import {
+  appMode,
+  workspaceStorageKey,
+  cloudWorkspaceKey,
+  productionDefaults,
+  type AppMode,
+} from "@/lib/workspace";
 
 type PresetKey = ShopPreset["id"];
 export interface StockReceipt {
@@ -56,6 +63,7 @@ export interface HeldCart {
   createdAt: string;
 }
 interface StoreData {
+  appMode?: AppMode;
   products: Product[];
   customers: Customer[];
   debtEntries: DebtEntry[];
@@ -74,13 +82,16 @@ interface StoreData {
   revision: number;
   currentShopPreset: PresetKey;
 }
-const PREFIX = "PADDL_WORKSPACE_V4_";
 const ACTIVE = "PADDLR_CURRENT_PRESET";
+const MODE = "PADDL_APP_MODE";
+const storageKey = (s: StoreData) =>
+  workspaceStorageKey(s.currentShopPreset, appMode(s.appMode));
 const id = (prefix: string) => prefix + "-" + crypto.randomUUID();
 const now = () => new Date().toISOString();
-function seed(key: PresetKey): StoreData {
+function seed(key: PresetKey, mode: AppMode = "DEMO"): StoreData {
   const p = structuredClone(ALL_SHOP_PRESETS[key]);
-  return {
+  const data: StoreData = {
+    appMode: mode,
     products: p.products,
     customers: p.customers,
     debtEntries: p.debtEntries,
@@ -99,10 +110,19 @@ function seed(key: PresetKey): StoreData {
     revision: 0,
     currentShopPreset: key,
   };
+  if (mode === "PRODUCTION")
+    return { ...data, ...productionDefaults(p.settings, data.staffList[0]) };
+  return data;
 }
 function validateBackup(value: unknown): asserts value is StoreData {
   assert(value && typeof value === "object", "Invalid backup.");
   const s = value as StoreData;
+  assert(
+    s.appMode === undefined ||
+      s.appMode === "DEMO" ||
+      s.appMode === "PRODUCTION",
+    "Invalid workspace mode.",
+  );
   assert(
     s.currentShopPreset in ALL_SHOP_PRESETS,
     "Unknown industry in backup.",
@@ -193,15 +213,20 @@ function useStoreState() {
     try {
       const selected = localStorage.getItem(ACTIVE) as PresetKey;
       const key = selected in ALL_SHOP_PRESETS ? selected : "SARI_SARI";
-      const saved = localStorage.getItem(PREFIX + key);
-      let initial = seed(key);
+      const mode = appMode(localStorage.getItem(MODE));
+      const saved = localStorage.getItem(workspaceStorageKey(key, mode));
+      let initial = seed(key, mode);
       if (saved) {
         const parsed = JSON.parse(saved);
         validateBackup(parsed);
+        assert(
+          appMode(parsed.appMode) === mode,
+          "Saved workspace mode does not match.",
+        );
         initial = parsed;
       } else {
         const legacy = localStorage.getItem("PEDDLR_PRO_STORE_V3");
-        if (legacy) {
+        if (legacy && mode === "DEMO") {
           const migrated = {
             ...initial,
             ...JSON.parse(legacy),
@@ -218,6 +243,8 @@ function useStoreState() {
       );
       if (
         auth?.staffId &&
+        appMode(auth.mode) === mode &&
+        (!auth.industry || auth.industry === key) &&
         initial.staffList.some((s) => s.id === auth.staffId && s.isActive)
       ) {
         apply({
@@ -236,7 +263,7 @@ function useStoreState() {
     const online = () => setOnline(true),
       offline = () => setOnline(false);
     const storage = (e: StorageEvent) => {
-      if (e.key === PREFIX + ref.current.currentShopPreset && e.newValue) {
+      if (e.key === storageKey(ref.current) && e.newValue) {
         try {
           const next = JSON.parse(e.newValue);
           validateBackup(next);
@@ -267,7 +294,7 @@ function useStoreState() {
   function commit<T>(operation: (draft: StoreData) => T): T {
     assert(mounted, "Store is still loading.");
     const s = ref.current;
-    const disk = localStorage.getItem(PREFIX + s.currentShopPreset);
+    const disk = localStorage.getItem(storageKey(s));
     if (disk) {
       const latest = JSON.parse(disk);
       validateBackup(latest);
@@ -283,10 +310,7 @@ function useStoreState() {
     const result = operation(next);
     next.revision++;
     try {
-      localStorage.setItem(
-        PREFIX + next.currentShopPreset,
-        JSON.stringify(next),
-      );
+      localStorage.setItem(storageKey(next), JSON.stringify(next));
     } catch {
       throw new Error(
         "Could not save on this device. Free browser storage or export a backup before continuing.",
@@ -838,6 +862,11 @@ function useStoreState() {
   const updateSettings = (updates: Partial<StoreSettings>) =>
     safely((s) => {
       requirePermission("canManageSettings");
+      if (updates.ownerPin !== undefined)
+        assert(
+          /^\d{4,6}$/.test(updates.ownerPin),
+          "Use a PIN of 4 to 6 digits.",
+        );
       Object.assign(s.settings, updates);
       audit(s, "SETTINGS_CHANGED", "Store settings updated");
     });
@@ -846,14 +875,16 @@ function useStoreState() {
       (s) => s.role === "OWNER" && s.isActive,
     );
     const valid =
-      !!owner && pin.trim() === (ref.current.settings.ownerPin || owner.pin);
+      !!owner &&
+      !!pin.trim() &&
+      pin.trim() === (ref.current.settings.ownerPin || owner.pin);
     if (valid) ownerApproval.current = Date.now() + 60_000;
     return valid;
   };
   const addStaff = (data: Omit<StaffUser, "id" | "createdAt">) =>
     commit((s) => {
       requirePermission("canManageUsers");
-      assert(/^\d{4}$/.test(data.pin), "Use a four-digit PIN.");
+      assert(/^\d{4,6}$/.test(data.pin), "Use a PIN of 4 to 6 digits.");
       const staff = { ...data, id: id("staff"), createdAt: now() };
       s.staffList.push(staff);
       audit(s, "USER_CREATED", "Added " + staff.name);
@@ -864,6 +895,8 @@ function useStoreState() {
       requirePermission("canManageUsers");
       const staff = s.staffList.find((u) => u.id === sid);
       assert(staff, "Staff not found.");
+      if (updates.pin !== undefined)
+        assert(/^\d{4,6}$/.test(updates.pin), "Use a PIN of 4 to 6 digits.");
       Object.assign(staff, updates, { id: sid });
       assert(
         s.staffList.some((u) => u.isActive && u.role === "OWNER"),
@@ -882,13 +915,17 @@ function useStoreState() {
     apply({ ...ref.current, currentStaff: staff });
     sessionStorage.setItem(
       "PADDL_SESSION",
-      JSON.stringify({ staffId: staff.id }),
+      JSON.stringify({
+        staffId: staff.id,
+        mode: appMode(ref.current.appMode),
+        industry: ref.current.currentShopPreset,
+      }),
     );
     setAuthenticated(true);
   }
   const loginWithPin = (sid: string, pin: string) => {
     const staff = ref.current.staffList.find((s) => s.id === sid && s.isActive);
-    if (!staff || staff.pin !== pin.trim())
+    if (!pin.trim() || !staff || staff.pin !== pin.trim())
       return {
         success: false,
         error: "Incorrect PIN or inactive staff account.",
@@ -900,6 +937,7 @@ function useStoreState() {
     toast.info("Use Switch staff and enter that staff member's PIN.");
   };
   const quickDemoLogin = (role: UserRole) => {
+    if (appMode(ref.current.appMode) !== "DEMO") return;
     const staff = ref.current.staffList.find(
       (s) => s.role === role && s.isActive,
     );
@@ -958,13 +996,18 @@ function useStoreState() {
         "Wait for the cloud backup to finish before switching workspaces.",
       );
       assert(key in ALL_SHOP_PRESETS, "Unknown industry.");
+      assert(
+        appMode(ref.current.appMode) === "DEMO",
+        "Industry demos are available in Demo Mode.",
+      );
       localStorage.setItem(
-        PREFIX + ref.current.currentShopPreset,
+        storageKey(ref.current),
         JSON.stringify(ref.current),
       );
-      const saved = localStorage.getItem(PREFIX + key);
+      const saved = localStorage.getItem(workspaceStorageKey(key, "DEMO"));
       const next = saved ? JSON.parse(saved) : seed(key);
       validateBackup(next);
+      assert(appMode(next.appMode) === "DEMO", "This is not a demo workspace.");
       localStorage.setItem(ACTIVE, key);
       apply(next);
       cloudRevision.current = null;
@@ -973,6 +1016,99 @@ function useStoreState() {
       setLastSyncedAt(null);
       setSyncError(null);
       ownerApproval.current = 0;
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message);
+      return false;
+    }
+  };
+  const switchAppMode = (
+    mode: AppMode,
+    industry: PresetKey = ref.current.currentShopPreset,
+  ) => {
+    try {
+      assert(
+        !syncing.current,
+        "Wait for the cloud backup to finish before switching modes.",
+      );
+      if (isAuthenticated) requirePermission("canManageSettings");
+      assert(industry in ALL_SHOP_PRESETS, "Choose a valid industry.");
+      const current = ref.current;
+      const saved = localStorage.getItem(workspaceStorageKey(industry, mode));
+      const next = saved ? JSON.parse(saved) : seed(industry, mode);
+      validateBackup(next);
+      assert(appMode(next.appMode) === mode, "Workspace mode does not match.");
+      const disk = localStorage.getItem(storageKey(current));
+      if (disk) {
+        const latest = JSON.parse(disk);
+        validateBackup(latest);
+        assert(
+          latest.revision <= current.revision,
+          "This workspace changed in another tab. Refresh before switching modes.",
+        );
+      }
+      localStorage.setItem(storageKey(current), JSON.stringify(current));
+      localStorage.setItem(storageKey(next), JSON.stringify(next));
+      localStorage.setItem(ACTIVE, industry);
+      localStorage.setItem(MODE, mode);
+      sessionStorage.removeItem("PADDL_SESSION");
+      setAuthenticated(false);
+      ownerApproval.current = 0;
+      cloudRevision.current = null;
+      cloudKey.current = null;
+      syncedLocalRevision.current = -1;
+      setLastSyncedAt(null);
+      setSyncError(null);
+      apply(next);
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message);
+      return false;
+    }
+  };
+  const setupProduction = (details: {
+    storeName: string;
+    ownerName: string;
+    pin: string;
+    address: string;
+    phone: string;
+  }) => {
+    try {
+      assert(
+        appMode(ref.current.appMode) === "PRODUCTION",
+        "Switch to Production Mode first.",
+      );
+      assert(
+        !ref.current.staffList.some(
+          (staff) => staff.role === "OWNER" && staff.pin,
+        ),
+        "This business is already set up. Sign in with your owner PIN.",
+      );
+      assert(
+        details.storeName.trim() && details.ownerName.trim(),
+        "Enter your business and owner names.",
+      );
+      assert(/^\d{6}$/.test(details.pin), "Choose a six-digit owner PIN.");
+      const staff = commit((s) => {
+        s.settings = {
+          ...s.settings,
+          storeName: details.storeName.trim(),
+          name: details.storeName.trim(),
+          address: details.address.trim(),
+          phone: details.phone.trim(),
+          ownerPin: details.pin,
+        };
+        const owner = {
+          ...s.staffList[0],
+          name: details.ownerName.trim(),
+          pin: details.pin,
+        };
+        s.staffList = [owner];
+        s.currentStaff = owner;
+        audit(s, "SETTINGS_CHANGED", "Production business setup completed");
+        return owner;
+      });
+      startSession(staff);
       return true;
     } catch (e) {
       toast.error((e as Error).message);
@@ -991,19 +1127,20 @@ function useStoreState() {
       const data = JSON.parse(json);
       validateBackup(data);
       assert(
+        appMode(data.appMode) === appMode(ref.current.appMode),
+        "This backup belongs to a different mode. Switch modes before restoring it.",
+      );
+      assert(
         data.currentShopPreset === ref.current.currentShopPreset,
         "Switch to the backup's industry before restoring.",
       );
       localStorage.setItem(
         "PADDL_RECOVERY_" + Date.now(),
-        localStorage.getItem(PREFIX + ref.current.currentShopPreset) ||
+        localStorage.getItem(storageKey(ref.current)) ||
           JSON.stringify(ref.current),
       );
       data.revision = ref.current.revision + 1;
-      localStorage.setItem(
-        PREFIX + data.currentShopPreset,
-        JSON.stringify(data),
-      );
+      localStorage.setItem(storageKey(data), JSON.stringify(data));
       apply(data);
       ownerApproval.current = 0;
       return true;
@@ -1015,16 +1152,17 @@ function useStoreState() {
   const resetToDemoData = () => {
     try {
       requirePermission("canManageSettings");
+      assert(
+        appMode(ref.current.appMode) === "DEMO",
+        "Demo reset is unavailable in Production Mode.",
+      );
       localStorage.setItem(
         "PADDL_RECOVERY_" + Date.now(),
         JSON.stringify(ref.current),
       );
       const next = seed(ref.current.currentShopPreset);
       next.revision = ref.current.revision + 1;
-      localStorage.setItem(
-        PREFIX + next.currentShopPreset,
-        JSON.stringify(next),
-      );
+      localStorage.setItem(storageKey(next), JSON.stringify(next));
       apply(next);
     } catch (e) {
       toast.error((e as Error).message);
@@ -1046,14 +1184,18 @@ function useStoreState() {
     setSyncing(true);
     setSyncError(null);
     const snapshot = structuredClone(ref.current);
-    const key = sessionUser.id + ":" + snapshot.currentShopPreset;
+    const workspace = cloudWorkspaceKey(
+      snapshot.currentShopPreset,
+      appMode(snapshot.appMode),
+    );
+    const key = sessionUser.id + ":" + workspace;
     try {
       if (cloudKey.current !== key) {
         const { data, error } = await supabase
           .from("paddl_backups")
           .select("revision")
           .eq("owner_id", sessionUser.id)
-          .eq("workspace", snapshot.currentShopPreset)
+          .eq("workspace", workspace)
           .maybeSingle();
         if (error) throw error;
         assert(
@@ -1064,7 +1206,7 @@ function useStoreState() {
         cloudKey.current = key;
       }
       const { data, error } = await supabase.rpc("save_paddl_backup", {
-        p_workspace: snapshot.currentShopPreset,
+        p_workspace: workspace,
         p_expected_revision: cloudRevision.current,
         p_payload: snapshot,
       });
@@ -1088,6 +1230,8 @@ function useStoreState() {
       return;
     }
     const key = ref.current.currentShopPreset;
+    const mode = appMode(ref.current.appMode);
+    const workspace = cloudWorkspaceKey(key, mode);
     const localRevision = ref.current.revision;
     try {
       requirePermission("canManageSettings");
@@ -1095,18 +1239,19 @@ function useStoreState() {
         .from("paddl_backups")
         .select("revision,payload")
         .eq("owner_id", sessionUser.id)
-        .eq("workspace", key)
+        .eq("workspace", workspace)
         .single();
       if (error) throw error;
       assert(
         ref.current.currentShopPreset === key &&
+          appMode(ref.current.appMode) === mode &&
           ref.current.revision === localRevision,
         "Workspace changed while downloading. Try again.",
       );
       validateBackup(data.payload);
       if (importDataJson(JSON.stringify(data.payload))) {
         cloudRevision.current = data.revision;
-        cloudKey.current = sessionUser.id + ":" + key;
+        cloudKey.current = sessionUser.id + ":" + workspace;
         syncedLocalRevision.current = ref.current.revision;
         setLastSyncedAt(now());
         setSyncError(null);
@@ -1158,6 +1303,12 @@ function useStoreState() {
           : "local";
   return {
     ...state,
+    appMode: appMode(state.appMode),
+    productionNeedsSetup:
+      appMode(state.appMode) === "PRODUCTION" &&
+      !state.staffList.some((staff) => staff.role === "OWNER" && staff.pin),
+    switchAppMode,
+    setupProduction,
     mounted,
     isOnline,
     isAuthenticated,

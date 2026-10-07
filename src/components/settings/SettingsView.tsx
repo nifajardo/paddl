@@ -59,7 +59,8 @@ export function SettingsView() {
     syncCloud, 
     exportDataJson, 
     importDataJson, 
-    resetToDemoData 
+    resetToDemoData,
+    appMode
   } = useStore();
 
   // Form states
@@ -69,9 +70,9 @@ export function SettingsView() {
   const [phone, setPhone] = useState(settings.phone);
   const [tinNumber, setTinNumber] = useState(settings.tinNumber);
   const [receiptFooter, setReceiptFooter] = useState(settings.receiptFooterMessage);
-  const [gcashNumber, setGcashNumber] = useState(settings.gcashNumber || "0917-123-4567");
-  const [mayaNumber, setMayaNumber] = useState(settings.mayaNumber || "0918-987-6543");
-  const [ownerPin, setOwnerPin] = useState(settings.ownerPin || "1234");
+  const [gcashNumber, setGcashNumber] = useState(settings.gcashNumber || "");
+  const [mayaNumber, setMayaNumber] = useState(settings.mayaNumber || "");
+  const [ownerPin, setOwnerPin] = useState(settings.ownerPin || "");
   const [requirePinForReports, setRequirePinForReports] = useState(settings.requirePinForReports ?? true);
 
   // Accessibility & Display State
@@ -84,7 +85,7 @@ export function SettingsView() {
   const [newStaffName, setNewStaffName] = useState("");
   const [newStaffEmail, setNewStaffEmail] = useState("");
   const [newStaffRole, setNewStaffRole] = useState<UserRole>("CASHIER");
-  const [newStaffPin, setNewStaffPin] = useState("1234");
+  const [newStaffPin, setNewStaffPin] = useState(appMode === "DEMO" ? "1234" : "");
   const [editingPermissionsStaffId, setEditingPermissionsStaffId] = useState<string | null>(null);
 
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -120,8 +121,9 @@ export function SettingsView() {
 
   const handleSaveSecurity = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!/^\d{4,6}$/.test(ownerPin)) { toast.error("Enter a PIN of 4 to 6 digits."); return; }
     updateSettings({
-      ownerPin: ownerPin.trim() || "1234",
+      ownerPin: ownerPin.trim(),
       requirePinForReports,
     });
     setSecuritySaved(true);
@@ -148,7 +150,7 @@ export function SettingsView() {
       name: newStaffName.trim(),
       email: newStaffEmail.trim().toLowerCase(),
       role: newStaffRole,
-      pin: newStaffPin.trim() || "1234",
+      pin: newStaffPin.trim(),
       isActive: true,
       permissions: {
         canVoidTransactions: newStaffRole === "OWNER" || newStaffRole === "MANAGER",
@@ -163,7 +165,7 @@ export function SettingsView() {
     setNewStaffName("");
     setNewStaffEmail("");
     setNewStaffRole("CASHIER");
-    setNewStaffPin("1234");
+    setNewStaffPin(appMode === "DEMO" ? "1234" : "");
     setIsAddStaffOpen(false);
     } catch (error) { toast.error((error as Error).message); }
   };
@@ -397,15 +399,15 @@ export function SettingsView() {
                   <div className="space-y-1">
                     <Label htmlFor="set-pin" className="text-xs font-semibold flex items-center gap-1 text-slate-700">
                       <KeyRound className="h-3.5 w-3.5 text-purple-600" />
-                      Owner 4-Digit Master PIN
+                      Owner authorization PIN
                     </Label>
                     <Input
                       id="set-pin"
                       type="password"
-                      maxLength={4}
+                      maxLength={6}
                       value={ownerPin}
-                      onChange={(e) => setOwnerPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                      placeholder="1234"
+                      onChange={(e) => setOwnerPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="4 to 6 digits"
                       className="text-xs h-9 font-mono tracking-widest text-center font-bold text-slate-900"
                     />
                     <p className="text-[10px] text-slate-400">Used to unlock Financial Reports & Settings when cashier is on duty</p>
@@ -425,7 +427,7 @@ export function SettingsView() {
                       />
                       <span className="text-[11px] text-slate-700 leading-tight">
                         <strong className="block text-slate-900">Enforce PIN Gate for Cashiers</strong>
-                        Prompts 4-digit PIN pad when any staff role other than OWNER tries to view Sales Reports or Store Settings.
+                        Prompts the owner PIN pad when any staff role other than OWNER tries to view Sales Reports or Store Settings.
                       </span>
                     </label>
                   </div>
@@ -602,7 +604,7 @@ export function SettingsView() {
                                 </Badge>
                               )}
                             </div>
-                            <p className="text-[11px] text-slate-400">{st.email} • PIN: {st.pin}</p>
+                            <p className="text-[11px] text-slate-400">{st.email}{appMode === "DEMO" && ` · Demo PIN: ${st.pin}`}</p>
                           </div>
                         </div>
 
@@ -809,7 +811,7 @@ export function SettingsView() {
                 </div>
               </div>
 
-              <div className="pt-4 border-t">
+              {appMode === "DEMO" && <div className="pt-4 border-t">
                 <Button
                   variant="destructive"
                   size="sm"
@@ -823,7 +825,7 @@ export function SettingsView() {
                   <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
                   Reset to Philippine Demo Preset
                 </Button>
-              </div>
+              </div>}
             </CardContent>
           </Card>
         </div>
@@ -883,15 +885,15 @@ export function SettingsView() {
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="staff-pin" className="text-xs font-semibold">4-Digit Access PIN</Label>
+                  <Label htmlFor="staff-pin" className="text-xs font-semibold">Staff access PIN</Label>
                   <Input
                     id="staff-pin"
                     type="password"
-                    maxLength={4}
+                    maxLength={6}
                     required
-                    placeholder="1234"
+                    placeholder="4 to 6 digits"
                     value={newStaffPin}
-                    onChange={(e) => setNewStaffPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                    onChange={(e) => setNewStaffPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                     className="text-xs h-9 font-mono tracking-widest text-center font-bold"
                   />
                 </div>

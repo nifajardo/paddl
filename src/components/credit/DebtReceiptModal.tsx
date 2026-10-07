@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { printDocument } from "@/lib/printing";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Printer, Share2 } from "lucide-react";
@@ -32,7 +33,7 @@ export function DebtReceiptModal({
   if (!isOpen || !receiptData) return null;
 
   const handlePrint = () => {
-    window.print();
+    printDocument("#printable-debt-receipt", `Payment ${receiptData.receiptNo}`);
   };
 
   return (
@@ -46,12 +47,12 @@ export function DebtReceiptModal({
             Utang Payment Received
           </DialogTitle>
           <p className="text-xs text-slate-500 text-center">
-            Official Collection Acknowledgment Slip
+            Collection acknowledgment slip
           </p>
         </DialogHeader>
 
         {/* 58mm Receipt Preview */}
-        <div className="print-receipt bg-amber-50/20 border border-slate-300 rounded-xl p-4 font-mono text-xs text-slate-800 space-y-2.5">
+        <div id="printable-debt-receipt" className="print-receipt bg-amber-50/20 border border-slate-300 rounded-xl p-4 font-mono text-xs text-slate-800 space-y-2.5">
           <div className="text-center border-b border-dashed border-slate-300 pb-2">
             <h3 className="font-extrabold text-sm uppercase text-slate-900">{settings.storeName}</h3>
             <p className="text-[10px] text-slate-500">{settings.address}</p>

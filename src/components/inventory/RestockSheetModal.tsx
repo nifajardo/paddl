@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import { printDocument } from "@/lib/printing";
 import { Product } from "@/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -78,7 +79,7 @@ export function RestockSheetModal({
   };
 
   const handlePrint = () => {
-    window.print();
+    printDocument("#printable-restock-sheet", `${storeName} — Restock checklist`, "sheet");
   };
 
   return (
@@ -132,7 +133,8 @@ export function RestockSheetModal({
         </div>
 
         {/* Restock Items Table */}
-        <div className="border border-slate-200 rounded-xl overflow-hidden bg-white text-xs">
+        <div id="printable-restock-sheet" className="border border-slate-200 rounded-xl overflow-hidden bg-white text-xs">
+          <div className="p-3 border-b"><strong>{storeName} — Restock checklist</strong><p>{new Date().toLocaleDateString("en-PH")} · Estimated budget: ₱{totalCapitalRequired.toFixed(2)}</p></div>
           <table className="w-full text-left">
             <thead className="bg-slate-100 border-b border-slate-200 text-slate-600 font-bold">
               <tr>

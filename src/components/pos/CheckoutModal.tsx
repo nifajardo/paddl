@@ -222,7 +222,7 @@ export function CheckoutModal({
             )}
             {discount === "SENIOR_PWD_20" && (
               <p className="checkout-note">
-                Simple demo discount. Statutory senior/PWD and VAT calculations
+                Promotional discount. Statutory senior/PWD and VAT calculations
                 are not applied.
               </p>
             )}

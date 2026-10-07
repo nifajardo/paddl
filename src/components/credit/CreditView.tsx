@@ -402,7 +402,7 @@ export function CreditView() {
       </div>
 
       {/* CUSTOMER LEDGER DRAWER */}
-      {Boolean(activeCustomer) && (
+      {Boolean(activeCustomer) && !isPaymentModalOpen && !isManualDebtModalOpen && !isSmsModalOpen && !isReceiptModalOpen && (
         <Sheet open={Boolean(activeCustomer)} onOpenChange={(open) => !open && setActiveCustomer(null)}>
         <SheetContent side="right" className="w-full sm:max-w-md p-6 flex flex-col">
           {activeCustomer && (

@@ -38,7 +38,8 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
     sessionUser, 
     signOut, 
     isSupabaseActive, 
-    settings 
+    settings,
+    appMode
   } = useStore();
 
   const [authMode, setAuthMode] = useState<"EMAIL" | "PIN">("PIN");
@@ -84,7 +85,7 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
       setEnteredPin("");
       onClose();
     } else {
-      setPinError("Incorrect 4-digit PIN for selected employee.");
+      setPinError("Incorrect PIN for the selected employee.");
       toast.error("Incorrect PIN");
     }
   };
@@ -117,7 +118,7 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
                 {isSupabaseActive ? "Cloud backup available" : "Device workspace"}
               </span>
               <p className="text-[10px] text-slate-400 font-mono">
-                {sessionUser ? "Cloud account signed in" : "Local demo staff access"}
+                {sessionUser ? "Cloud account signed in" : appMode === "DEMO" ? "Local demo staff access" : "Business staff access"}
               </p>
             </div>
           </div>
@@ -199,17 +200,17 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label htmlFor="cashier-pin-input" className="text-xs font-semibold text-slate-700">
-                  2. Enter 4-Digit Security PIN:
+                  2. Enter staff PIN:
                 </Label>
-                <span className="text-[10px] text-slate-400 font-mono">Demo: 1234</span>
+                {appMode === "DEMO" && <span className="text-[10px] text-slate-400 font-mono">Demo: 1234</span>}
               </div>
               <Input
                 id="cashier-pin-input"
                 type="password"
-                maxLength={4}
+                maxLength={6}
                 required
                 value={enteredPin}
-                onChange={(e) => setEnteredPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                onChange={(e) => setEnteredPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 placeholder="••••"
                 className="h-11 text-center font-mono text-xl tracking-widest font-black bg-slate-50"
                 autoFocus
@@ -283,12 +284,11 @@ export function LoginModal({ isOpen, onClose }: LoginModalProps) {
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  toast.info("Offline demo mode activated. No login required.");
                   onClose();
                 }}
                 className="text-xs text-slate-500 hover:text-slate-800"
               >
-                Skip / Demo Mode
+                Back
               </Button>
 
               <div className="flex gap-2">

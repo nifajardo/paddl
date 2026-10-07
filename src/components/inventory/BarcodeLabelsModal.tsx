@@ -1,4 +1,6 @@
 "use client";
+import JsBarcode from "jsbarcode";
+import { printDocument } from "@/lib/printing";
 
 import React, { useState } from "react";
 import { Product } from "@/types";
@@ -14,54 +16,19 @@ interface BarcodeLabelsModalProps {
   onClose: () => void;
 }
 
-// Generate an SVG Barcode pattern based on string hash / digits
+// Code 128 includes start/stop symbols and checksum, unlike the old visual hash.
 function SvgBarcode({ value }: { value: string }) {
-  // Deterministic bar widths based on char codes
-  const bars: { width: number; isBlack: boolean }[] = [];
-  
-  // Start guard
-  bars.push({ width: 2, isBlack: true });
-  bars.push({ width: 1, isBlack: false });
-  bars.push({ width: 2, isBlack: true });
-  bars.push({ width: 2, isBlack: false });
-
-  const safeVal = (value || "00000000").replace(/[^a-zA-Z0-9]/g, "");
-  for (let i = 0; i < safeVal.length; i++) {
-    const code = safeVal.charCodeAt(i);
-    const w1 = (code % 3) + 1;
-    const w2 = ((code >> 1) % 2) + 1;
-    const w3 = ((code >> 2) % 3) + 1;
-    const w4 = ((code >> 3) % 2) + 1;
-
-    bars.push({ width: w1, isBlack: true });
-    bars.push({ width: w2, isBlack: false });
-    bars.push({ width: w3, isBlack: true });
-    bars.push({ width: w4, isBlack: false });
-  }
-
-  // Stop guard
-  bars.push({ width: 2, isBlack: true });
-  bars.push({ width: 1, isBlack: false });
-  bars.push({ width: 3, isBlack: true });
-
-  let currentX = 5;
-  const rects: { x: number; width: number }[] = [];
-  bars.forEach((b) => {
-    if (b.isBlack) {
-      rects.push({ x: currentX, width: b.width * 1.5 });
-    }
-    currentX += b.width * 1.5;
-  });
-
-  return (
-    <svg viewBox={`0 0 ${currentX + 10} 42`} className="w-full h-10 max-h-10" preserveAspectRatio="none">
-      {rects.map((r, idx) => (
-        <rect key={idx} x={r.x} y={2} width={r.width} height={36} fill="#000" />
-      ))}
-    </svg>
-  );
+  const encoded = React.useMemo(() => {
+    const result: { encodings?: { data: string }[] } = {};
+    try { JsBarcode(result, value, { format: "CODE128", displayValue: false }); return result.encodings?.map((part) => part.data).join("") || ""; }
+    catch { return ""; }
+  }, [value]);
+  if (!encoded) return <span className="text-xs text-red-700">Set a valid ASCII barcode to print this label.</span>;
+  return <svg role="img" aria-label={`Code 128 barcode ${value}`} viewBox={`0 0 ${encoded.length + 20} 45`} style={{width:"100%",height:"45px"}} preserveAspectRatio="xMidYMid meet">
+    <rect width={encoded.length + 20} height={45} fill="white" />
+    {[...encoded].map((bit, index) => bit === "1" ? <rect key={index} x={index + 10} y={0} width={1} height={45} fill="black" /> : null)}
+  </svg>;
 }
-
 export function BarcodeLabelsModal({ isOpen, onClose }: BarcodeLabelsModalProps) {
   const { products, settings } = useStore();
   const [search, setSearch] = useState("");
@@ -126,7 +93,7 @@ export function BarcodeLabelsModal({ isOpen, onClose }: BarcodeLabelsModalProps)
   });
 
   const handlePrint = () => {
-    window.print();
+    printDocument("#printable-barcode-labels", `${settings.storeName} — Barcode labels`, labelFormat === "SHEET" ? "sheet" : "receipt");
   };
 
   if (!isOpen) return null;
@@ -267,7 +234,7 @@ export function BarcodeLabelsModal({ isOpen, onClose }: BarcodeLabelsModalProps)
                 Select one or more products above to generate shelf barcode tags.
               </div>
             ) : (
-              <div
+              <div id="printable-barcode-labels"
                 className={`gap-3 ${
                   labelFormat === "SHEET"
                     ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 print:grid-cols-3 print:gap-2"
@@ -283,7 +250,7 @@ export function BarcodeLabelsModal({ isOpen, onClose }: BarcodeLabelsModalProps)
                   >
                     {/* Header: Store Name */}
                     <div className="text-[9px] uppercase tracking-wider font-bold text-slate-500 truncate pb-0.5">
-                      {settings.name || "PADDL+ STORE"}
+                      {settings.storeName}
                     </div>
 
                     {/* Product Name */}
@@ -301,9 +268,9 @@ export function BarcodeLabelsModal({ isOpen, onClose }: BarcodeLabelsModalProps)
 
                     {/* Barcode Graphic */}
                     <div className="my-1.5 px-1 bg-white">
-                      <SvgBarcode value={prod.barcode || `SKU-${prod.id.slice(-6)}`} />
+                      <SvgBarcode value={prod.barcode || prod.id} />
                       <div className="font-mono text-[9px] tracking-widest text-slate-700 mt-0.5 font-bold">
-                        {prod.barcode || `SKU-${prod.id.slice(-6)}`}
+                        {prod.barcode || prod.id}
                       </div>
                     </div>
 

@@ -205,11 +205,11 @@ export function VoidTransactionModal({
                 </Label>
                 <Input
                   type="password"
-                  maxLength={4}
-                  placeholder="Enter 4-digit PIN (default 1234)"
+                  maxLength={6}
+                  placeholder="Enter owner PIN"
                   value={pin}
                   onChange={(e) => {
-                    setPin(e.target.value.replace(/\D/g, "").slice(0, 4));
+                    setPin(e.target.value.replace(/\D/g, "").slice(0, 6));
                     setPinError("");
                   }}
                   className="text-xs font-mono tracking-widest text-center h-9 font-bold"
