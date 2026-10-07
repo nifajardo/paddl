@@ -2,6 +2,7 @@
 
 import React from "react";
 import { printDocument } from "@/lib/printing";
+import { netSale } from "@/lib/commerce";
 import { StoreSettings, CashDrawerShift, Transaction, Expense } from "@/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ interface ZReadingModalProps {
   isOpen: boolean;
   onClose: () => void;
   settings: StoreSettings;
+  periodLabel: string;
   cashDrawer: CashDrawerShift;
   cashierName: string;
   transactions: Transaction[];
@@ -28,6 +30,7 @@ export function ZReadingModal({
   isOpen,
   onClose,
   settings,
+  periodLabel,
   cashDrawer,
   cashierName,
   transactions,
@@ -57,7 +60,7 @@ export function ZReadingModal({
     hour12: true,
   });
 
-  const netSales = transactions.filter(t => !["VOID", "VOIDED"].includes(t.status)).reduce((sum, t) => sum + t.total - (t.refundedAmount || 0), 0);
+  const netSales = transactions.reduce((sum, t) => sum + netSale(t), 0);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -90,6 +93,8 @@ export function ZReadingModal({
             <div className="text-[10px] text-slate-500">
               Date: {currentDate} {currentTime}
             </div>
+            <div className="text-[10px] text-slate-600">Period: {periodLabel} · Asia/Manila</div>
+            <div className="text-[9px] text-slate-500">Returns attributed to original sales; collections excluded.</div>
             <div className="text-[10px] text-slate-500">
               Terminal: POS-01 | Cashier: {cashierName}
             </div>
@@ -104,6 +109,10 @@ export function ZReadingModal({
             <div className="flex justify-between text-slate-600">
               <span>Discounts (already included):</span>
               <span>-₱{totalDiscount.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-slate-600">
+              <span>Recorded refunds:</span>
+              <span>-₱{(grossSales - netSales).toFixed(2)}</span>
             </div>
             <div className="flex justify-between font-bold text-xs pt-0.5 border-t border-slate-200">
               <span>NET SALES:</span>
@@ -122,7 +131,7 @@ export function ZReadingModal({
               <span>-₱{operatingExpenses.toFixed(2)}</span>
             </div>
             <div className="flex justify-between font-extrabold text-xs pt-1 border-t border-slate-300">
-              <span>NET TAKE-HOME PROFIT:</span>
+              <span>ESTIMATED NET PROFIT:</span>
               <span className="text-emerald-800">₱{netProfit.toFixed(2)}</span>
             </div>
           </div>
@@ -135,13 +144,16 @@ export function ZReadingModal({
               <span>₱{(paymentBreakdown["CASH"] || 0).toFixed(2)}</span>
             </div>
             <div className="flex justify-between">
-              <span>GCash (QR Ph):</span>
+              <span>GCash:</span>
               <span>₱{(paymentBreakdown["GCASH"] || 0).toFixed(2)}</span>
             </div>
             <div className="flex justify-between">
               <span>Maya:</span>
               <span>₱{(paymentBreakdown["MAYA"] || 0).toFixed(2)}</span>
             </div>
+            {Object.entries(paymentBreakdown).filter(([method]) => !["CASH", "GCASH", "MAYA", "CREDIT_UTANG", "SPLIT"].includes(method)).map(([method, amount]) => (
+              <div key={method} className="flex justify-between"><span>{method.replaceAll("_", " ")}:</span><span>₱{amount.toFixed(2)}</span></div>
+            ))}
             <div className="flex justify-between text-amber-700">
               <span>Credit / Utang:</span>
               <span>₱{(paymentBreakdown["CREDIT_UTANG"] || 0).toFixed(2)}</span>
@@ -150,7 +162,8 @@ export function ZReadingModal({
 
           {/* Cash Drawer Status */}
           <div className="space-y-1 py-1 text-[11px]">
-            <div className="font-bold uppercase text-[10px] text-slate-500 mb-0.5">Cash Drawer Balance:</div>
+            <div className="font-bold uppercase text-[10px] text-slate-500 mb-0.5">Current Drawer · {cashDrawer.status}</div>
+            <p className="text-[9px] text-slate-500">Current shift snapshot, separate from the sales period above.</p>
             <div className="flex justify-between text-slate-600">
               <span>Opening Float:</span>
               <span>₱{cashDrawer.openingCash.toFixed(2)}</span>

@@ -39,6 +39,7 @@ export function CreditView() {
 
   // Selected Customer for Ledger Drawer
   const [activeCustomer, setActiveCustomer] = useState<Customer | null>(null);
+  const [isLedgerOpen, setIsLedgerOpen] = useState(false);
 
   // Modals
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
@@ -126,8 +127,8 @@ export function CreditView() {
     const amt = parseFloat(payAmount) || 0;
     if (amt <= 0) return;
 
-    sound.chaChing();
     try { recordDebtPayment(activeCustomer.id, amt, payMethod, payNotes); } catch (error) { toast.error((error as Error).message); return; }
+    sound.chaChing();
     setIsPaymentModalOpen(false);
 
     const remaining = Math.max(0, activeCustomer.totalDebt - amt);
@@ -180,12 +181,18 @@ export function CreditView() {
       name: newName.trim(),
       phone: newPhone.trim(),
       address: newAddress.trim() || undefined,
-      creditLimit: parseFloat(newCreditLimit) || 1500,
+      creditLimit: Number(newCreditLimit),
       notes: newNotes.trim() || undefined,
     });
 
     setIsAddCustomerOpen(false);
-    setActiveCustomer(created);
+    setActiveCustomer(null);
+    setIsLedgerOpen(false);
+    setSearch(created.name);
+    setFilterType("ALL");
+    toast.success(`${created.name} registered with a zero balance.`, {
+      description: "Use Add Utang for an existing balance, or select this customer at checkout for a new credit sale.",
+    });
     } catch (error) { toast.error((error as Error).message); }
   };
 
@@ -281,7 +288,7 @@ export function CreditView() {
             />
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <Button
               variant={filterType === "WITH_DEBT" ? "default" : "outline"}
               size="sm"
@@ -362,11 +369,17 @@ export function CreditView() {
                   <Button
                     variant="outline"
                     size="xs"
-                    onClick={() => setActiveCustomer(cust)}
+                    onClick={() => { setActiveCustomer(cust); setIsLedgerOpen(true); }}
                     className="text-xs text-slate-700 flex-1"
                   >
                     <History className="h-3 w-3 mr-1" /> Ledger
                   </Button>
+
+                  {!hasDebt && (
+                    <Button variant="outline" size="xs" onClick={() => handleOpenManualDebt(cust)} className="text-xs text-amber-700">
+                      + Add Utang
+                    </Button>
+                  )}
 
                   {hasDebt && (
                     <>
@@ -402,8 +415,8 @@ export function CreditView() {
       </div>
 
       {/* CUSTOMER LEDGER DRAWER */}
-      {Boolean(activeCustomer) && !isPaymentModalOpen && !isManualDebtModalOpen && !isSmsModalOpen && !isReceiptModalOpen && (
-        <Sheet open={Boolean(activeCustomer)} onOpenChange={(open) => !open && setActiveCustomer(null)}>
+      {isLedgerOpen && Boolean(activeCustomer) && !isAddCustomerOpen && !isPaymentModalOpen && !isManualDebtModalOpen && !isSmsModalOpen && !isReceiptModalOpen && (
+        <Sheet open={isLedgerOpen} onOpenChange={(open) => { if (!open) { setIsLedgerOpen(false); setActiveCustomer(null); } }}>
         <SheetContent side="right" className="w-full sm:max-w-md p-6 flex flex-col">
           {activeCustomer && (
             <>
@@ -461,7 +474,7 @@ export function CreditView() {
                 </span>
 
                 {customerEntries.length === 0 ? (
-                  <p className="text-xs text-slate-400 py-6 text-center">No transactions recorded yet.</p>
+                  <p className="text-xs text-slate-500 py-6 text-center">No credit activity yet. Registration starts at ₱0.00. Use Add Utang for a previous balance, or choose this customer at checkout and pay with Utang / Credit.</p>
                 ) : (
                   customerEntries.map((entry) => {
                     const isIncrease = entry.type === "DEBT_INCREASE";
@@ -735,6 +748,7 @@ export function CreditView() {
         <DialogContent className="max-w-md p-6">
           <DialogHeader>
             <DialogTitle className="text-base font-bold">Register New Customer</DialogTitle>
+            <p className="text-xs text-slate-500">Creates a customer with a zero balance. You can record an existing utang afterward, or select the customer during a credit sale.</p>
           </DialogHeader>
 
           <form onSubmit={handleSaveNewCustomer} className="space-y-3 text-xs">
@@ -766,6 +780,9 @@ export function CreditView() {
                 <Input
                   id="cust-limit"
                   type="number"
+                  required
+                  min="0"
+                  step="0.01"
                   value={newCreditLimit}
                   onChange={(e) => setNewCreditLimit(e.target.value)}
                   className="text-xs h-9"

@@ -244,6 +244,15 @@ export function netSale(txn: Transaction) {
     ? 0
     : money(txn.total - (txn.refundedAmount || 0));
 }
+export function retainedLine(txn: Transaction, productId: string) {
+  const item = txn.items.find(i => i.product.id === productId);
+  if (!item || ["VOID", "VOIDED"].includes(txn.status)) return { quantity: 0, revenue: 0 };
+  const returns = (txn.returnHistory || []).flatMap(r => r.returnedItems).filter(i => i.productId === productId);
+  return {
+    quantity: money(Math.max(0, item.quantity - returns.reduce((sum, i) => sum + i.quantity, 0))),
+    revenue: money(Math.max(0, linePaidTotal(txn, productId) - returns.reduce((sum, i) => sum + i.refundAmount, 0))),
+  };
+}
 export function retainedCost(txn: Transaction) {
   if (["VOID", "VOIDED"].includes(txn.status)) return 0;
   return money(

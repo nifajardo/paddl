@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { netSale, retainedCost } from "@/lib/commerce";
 import { useStore } from "@/context/StoreContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,19 @@ export function ExecutiveDashboard({ onNavigateTab }: ExecutiveDashboardProps) {
   } = useStore();
 
   const [isZReadingOpen, setIsZReadingOpen] = useState(false);
+
+  const summarySales = transactions.filter(t => !["VOID", "VOIDED"].includes(t.status));
+  const summaryNet = summarySales.reduce((sum, t) => sum + netSale(t), 0);
+  const summaryCost = summarySales.reduce((sum, t) => sum + retainedCost(t), 0);
+  const summaryExpenses = expenses.filter(e => !["Supplier & Stock Restock", "Personal Drawings"].includes(e.category)).reduce((sum, e) => sum + e.amount, 0);
+  const summaryTenders: Record<string, number> = {};
+  for (const t of summarySales) {
+    if (t.paymentMethod === "SPLIT" && t.splitDetail) {
+      const ratio = t.total ? netSale(t) / t.total : 0;
+      summaryTenders.CASH = (summaryTenders.CASH || 0) + t.splitDetail.cashAmount * ratio;
+      summaryTenders[t.splitDetail.digitalMethod] = (summaryTenders[t.splitDetail.digitalMethod] || 0) + t.splitDetail.digitalAmount * ratio;
+    } else summaryTenders[t.paymentMethod] = (summaryTenders[t.paymentMethod] || 0) + netSale(t);
+  }
 
   // Time calculations for "Today"
   const todayMetrics = useMemo(() => {
@@ -568,17 +582,18 @@ export function ExecutiveDashboard({ onNavigateTab }: ExecutiveDashboardProps) {
           isOpen={isZReadingOpen}
           onClose={() => setIsZReadingOpen(false)}
           settings={settings}
+          periodLabel="All time"
           cashDrawer={cashDrawer}
           cashierName={currentStaff.name}
-          transactions={transactions}
+          transactions={summarySales}
           expenses={expenses}
-          grossSales={todayMetrics.grossSalesToday}
-          totalDiscount={0}
-          cogs={0}
-          grossProfit={todayMetrics.grossSalesToday}
-          operatingExpenses={0}
-          netProfit={todayMetrics.grossSalesToday}
-          paymentBreakdown={{ CASH: todayMetrics.grossSalesToday }}
+          grossSales={summarySales.reduce((sum, t) => sum + t.total, 0)}
+          totalDiscount={summarySales.reduce((sum, t) => sum + t.discountAmount, 0)}
+          cogs={summaryCost}
+          grossProfit={summaryNet - summaryCost}
+          operatingExpenses={summaryExpenses}
+          netProfit={summaryNet - summaryCost - summaryExpenses}
+          paymentBreakdown={summaryTenders}
         />
       )}
     </div>

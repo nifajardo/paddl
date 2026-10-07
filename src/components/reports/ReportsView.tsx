@@ -2,7 +2,8 @@
 
 import React, { useState, useMemo } from "react";
 import { useStore } from "@/context/StoreContext";
-import { businessDate, retainedCost, netSale, csvCell, downloadFile } from "@/lib/commerce";
+import { businessDate, retainedCost, retainedLine, netSale, csvCell, downloadFile } from "@/lib/commerce";
+import { reportRange, inReportRange } from "@/lib/reports";
 import { Transaction, Product } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -83,75 +84,11 @@ export function ReportsView() {
   const [selectedTxForVoid, setSelectedTxForVoid] = useState<Transaction | null>(null);
   const [selectedTxForReturn, setSelectedTxForReturn] = useState<Transaction | null>(null);
 
-  // Compute Timeframe ranges
-  const { filteredTxns, filteredExpenses } = useMemo(() => {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const endOfToday = startOfToday + 86400000 - 1;
-    const startOfYesterday = startOfToday - 86400000;
-    const endOfYesterday = startOfToday - 1;
-
-    // This week (Monday start)
-    const day = now.getDay();
-    const diffToMonday = (day === 0 ? -6 : 1) - day;
-    const startOfThisWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMonday).getTime();
-    const startOfLastWeek = startOfThisWeek - 7 * 86400000;
-    const endOfLastWeek = startOfThisWeek - 1;
-
-    // Months
-    const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
-    const endOfLastMonth = startOfThisMonth - 1;
-
-    // Year
-    const startOfThisYear = new Date(now.getFullYear(), 0, 1).getTime();
-
-    const txns = transactions.filter((t) => {
-      // Exact date filter overrides preset if set
-      if (exactDateSearch) {
-        return businessDate(t.createdAt) === exactDateSearch;
-      }
-
-      const tTime = new Date(t.createdAt).getTime();
-
-      if (timeframe === "TODAY") return tTime >= startOfToday && tTime <= endOfToday;
-      if (timeframe === "YESTERDAY") return tTime >= startOfYesterday && tTime <= endOfYesterday;
-      if (timeframe === "THIS_WEEK") return tTime >= startOfThisWeek;
-      if (timeframe === "LAST_WEEK") return tTime >= startOfLastWeek && tTime <= endOfLastWeek;
-      if (timeframe === "THIS_MONTH") return tTime >= startOfThisMonth;
-      if (timeframe === "LAST_MONTH") return tTime >= startOfLastMonth && tTime <= endOfLastMonth;
-      if (timeframe === "THIS_YEAR") return tTime >= startOfThisYear;
-      if (timeframe === "CUSTOM") {
-        const start = customStartDate ? new Date(customStartDate).getTime() : 0;
-        const end = customEndDate ? new Date(customEndDate).getTime() + 86400000 - 1 : Infinity;
-        return tTime >= start && tTime <= end;
-      }
-      return true;
-    });
-
-    const exps = expenses.filter((e) => {
-      if (exactDateSearch) {
-        return businessDate(e.date) === exactDateSearch;
-      }
-
-      const eTime = new Date(e.date).getTime();
-      if (timeframe === "TODAY") return eTime >= startOfToday && eTime <= endOfToday;
-      if (timeframe === "YESTERDAY") return eTime >= startOfYesterday && eTime <= endOfYesterday;
-      if (timeframe === "THIS_WEEK") return eTime >= startOfThisWeek;
-      if (timeframe === "LAST_WEEK") return eTime >= startOfLastWeek && eTime <= endOfLastWeek;
-      if (timeframe === "THIS_MONTH") return eTime >= startOfThisMonth;
-      if (timeframe === "LAST_MONTH") return eTime >= startOfLastMonth && eTime <= endOfLastMonth;
-      if (timeframe === "THIS_YEAR") return eTime >= startOfThisYear;
-      if (timeframe === "CUSTOM") {
-        const start = customStartDate ? new Date(customStartDate).getTime() : 0;
-        const end = customEndDate ? new Date(customEndDate).getTime() + 86400000 - 1 : Infinity;
-        return eTime >= start && eTime <= end;
-      }
-      return true;
-    });
-
-    return { filteredTxns: txns, filteredExpenses: exps };
-  }, [transactions, expenses, timeframe, customStartDate, customEndDate, exactDateSearch]);
+  const period = reportRange(timeframe, customStartDate, customEndDate, exactDateSearch);
+  const invalidRange = Boolean(period.start && period.end && period.start > period.end);
+  const filteredTxns = transactions.filter(t => !invalidRange && inReportRange(t.createdAt, period));
+  const filteredExpenses = expenses.filter(e => !invalidRange && inReportRange(e.date, period));
+  const filteredAuditLogs = auditLogs.filter(log => !invalidRange && inReportRange(log.timestamp || log.createdAt, period));
 
   // Non-voided valid sales for financial analytics
   const validFinancialTxns = useMemo(() => {
@@ -167,16 +104,9 @@ export function ReportsView() {
     return validFinancialTxns.reduce((sum, t) => sum + t.discountAmount, 0);
   }, [validFinancialTxns]);
 
-  // Total refunds in period
-  const totalRefunds = useMemo(() => {
-    const validIds = new Set(validFinancialTxns.map((t) => t.id));
-    return returnRecords
-      .filter((r) => validIds.has(r.originalTransactionId || r.transactionId))
-      .reduce((sum, r) => sum + (r.refundAmount ?? r.totalRefundAmount ?? 0), 0);
-  }, [validFinancialTxns, returnRecords]);
-
-  // Net Sales (Gross - Refunds)
-  const netSales = Math.max(0, grossSales - totalRefunds);
+  // Sales-period reporting includes all returns recorded against these sales.
+  const totalRefunds = validFinancialTxns.reduce((sum, t) => sum + (t.refundedAmount || 0), 0);
+  const netSales = validFinancialTxns.reduce((sum, t) => sum + netSale(t), 0);
 
   // Cost of Goods Sold (COGS)
   const cogs = useMemo(() => validFinancialTxns.reduce((sum, txn) => sum + retainedCost(txn), 0), [validFinancialTxns]);
@@ -206,19 +136,20 @@ export function ReportsView() {
 
   // Top Selling Items
   const topSellers = useMemo(() => {
-    const itemMap: Record<string, { product: any; qty: number; revenue: number }> = {};
+    const itemMap: Record<string, { product: Product; qty: number; revenue: number }> = {};
     validFinancialTxns.forEach((t) => {
       t.items.forEach((item) => {
         if (!itemMap[item.product.id]) {
           itemMap[item.product.id] = { product: item.product, qty: 0, revenue: 0 };
         }
-        const returned = (t.returnHistory || []).flatMap(r => r.returnedItems).filter(r => r.productId === item.product.id).reduce((sum, r) => sum + r.quantity, 0);
-        itemMap[item.product.id].qty += item.quantity - returned;
-        itemMap[item.product.id].revenue += item.subtotal * (t.subtotal ? netSale(t) / t.subtotal : 0);
+        const retained = retainedLine(t, item.product.id);
+        itemMap[item.product.id].qty += retained.quantity;
+        itemMap[item.product.id].revenue += retained.revenue;
       });
     });
 
     return Object.values(itemMap)
+      .filter(item => item.qty > 0 || item.revenue > 0)
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 8);
   }, [validFinancialTxns]);
@@ -248,23 +179,24 @@ export function ReportsView() {
     let totalQty = 0;
     let totalRevenue = 0;
 
-    transactions.forEach((t) => {
+    validFinancialTxns.forEach((t) => {
       if (t.status === "VOID" || t.status === "VOIDED") return;
       t.items.forEach((item) => {
-        if (item.product.id === targetProduct.id || item.product.name.toLowerCase() === targetProduct.name.toLowerCase()) {
-          totalQty += item.quantity;
-          totalRevenue += item.subtotal;
+        if (item.product.id === targetProduct.id) {
+          const retained = retainedLine(t, item.product.id);
+          totalQty += retained.quantity;
+          totalRevenue += retained.revenue;
           lines.push({
             transaction: t,
-            quantity: item.quantity,
+            quantity: retained.quantity,
             unitPrice: item.product.sellingPrice,
-            subtotal: item.subtotal,
+            subtotal: retained.revenue,
           });
         }
       });
     });
 
-    const avgPrice = totalQty > 0 ? totalRevenue / totalQty : targetProduct.sellingPrice;
+    const avgPrice = totalQty > 0 ? totalRevenue / totalQty : 0;
 
     return {
       product: targetProduct,
@@ -274,7 +206,7 @@ export function ReportsView() {
       averageSellingPrice: avgPrice,
       lines: lines.sort((a, b) => new Date(b.transaction.createdAt).getTime() - new Date(a.transaction.createdAt).getTime()),
     };
-  }, [productSearch, selectedDrillDownProduct, products, transactions]);
+  }, [productSearch, selectedDrillDownProduct, products, validFinancialTxns]);
 
   // Filtered Transaction History Ledger
   const ledgerTransactions = useMemo(() => {
@@ -320,6 +252,7 @@ export function ReportsView() {
         <div className="flex items-center gap-2 flex-wrap">
           <Button
             size="sm"
+            disabled={invalidRange}
             onClick={() => setIsZReadingOpen(true)}
             className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs h-9 font-semibold gap-1.5 shadow-sm"
           >
@@ -390,10 +323,10 @@ export function ReportsView() {
       </div>
 
       {/* Universal Date Range Filter Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-        <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+      <div className="min-w-0 bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+        <div className="min-w-0 flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
           {/* Preset Buttons */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="text-slate-400 font-semibold text-[11px] mr-1 shrink-0 flex items-center gap-1">
               <Calendar className="h-3 w-3" /> Preset:
             </span>
@@ -475,11 +408,13 @@ export function ReportsView() {
               />
             </div>
             <span className="text-[11px] text-slate-400">
-              Showing data between selected dates inclusive
+              {invalidRange ? "Start date must be on or before end date." : "Dates are inclusive, in Philippine time."}
             </span>
           </div>
         )}
       </div>
+
+      <p className="text-xs text-slate-500">Reporting period: {period.label} · Philippine time. Returns are attributed to the original sale. Debt collections are not new sales.</p>
 
       {/* TAB 1: FINANCIAL P&L SUMMARY */}
       {activeTab === "FINANCIAL" && (
@@ -489,7 +424,7 @@ export function ReportsView() {
             <Card className="bg-white border-slate-200">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-slate-500">Gross Sales</span>
+                  <span className="text-xs font-medium text-slate-500">Sales after discounts</span>
                   <DollarSign className="h-4 w-4 text-emerald-600" />
                 </div>
                 <div className="text-xl sm:text-2xl font-bold text-slate-900 mt-1">
@@ -567,33 +502,13 @@ export function ReportsView() {
                 </h3>
 
                 <div className="space-y-3 text-xs">
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-emerald-50/60 border border-emerald-100">
-                    <span className="font-semibold text-emerald-950">Cash in Hand / Drawer</span>
-                    <span className="font-bold text-emerald-700 font-mono">
-                      ₱{(paymentBreakdown["CASH"] || 0).toFixed(2)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-blue-50/60 border border-blue-100">
-                    <span className="font-semibold text-blue-950">GCash / QR Ph E-Wallet</span>
-                    <span className="font-bold text-blue-700 font-mono">
-                      ₱{(paymentBreakdown["GCASH"] || 0).toFixed(2)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-purple-50/60 border border-purple-100">
-                    <span className="font-semibold text-purple-950">Split Bill (Cash + Digital)</span>
-                    <span className="font-bold text-purple-700 font-mono">
-                      ₱{(paymentBreakdown["SPLIT"] || 0).toFixed(2)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-amber-50/60 border border-amber-100">
-                    <span className="font-semibold text-amber-950">Credit / Utang Accounts</span>
-                    <span className="font-bold text-amber-700 font-mono">
-                      ₱{(paymentBreakdown["CREDIT_UTANG"] || 0).toFixed(2)}
-                    </span>
-                  </div>
+                  {Object.entries(paymentBreakdown).filter(([method]) => method !== "SPLIT").map(([method, amount]) => (
+                    <div key={method} className="flex items-center justify-between gap-3 p-2 rounded-lg bg-slate-50 border border-slate-100">
+                      <span className="font-semibold text-slate-700">{({ CASH: "Cash sales", GCASH: "GCash", MAYA: "Maya", CREDIT_UTANG: "Credit / Utang", BANK_TRANSFER: "Bank transfer", CARD: "Card" } as Record<string, string>)[method] || method}</span>
+                      <span className="font-bold text-slate-900 font-mono">₱{amount.toFixed(2)}</span>
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-slate-500">Split payments are allocated to cash and their digital channel. These are net sales, not the current drawer balance.</p>
                 </div>
               </CardContent>
             </Card>
@@ -724,14 +639,14 @@ export function ReportsView() {
                   {/* 4 Performance Tiles */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="bg-white p-3 rounded-lg border border-emerald-100">
-                      <span className="text-[11px] text-slate-500 block">Total Units Sold</span>
+                      <span className="text-[11px] text-slate-500 block">Units retained after returns</span>
                       <span className="text-xl font-black text-slate-900">
                         {productDrillDownData.totalQty} {productDrillDownData.product.unit || "pcs"}
                       </span>
                     </div>
 
                     <div className="bg-white p-3 rounded-lg border border-emerald-100">
-                      <span className="text-[11px] text-slate-500 block">Gross Revenue Generated</span>
+                      <span className="text-[11px] text-slate-500 block">Net revenue after discounts & returns</span>
                       <span className="text-xl font-black text-emerald-700">
                         ₱{productDrillDownData.totalRevenue.toFixed(2)}
                       </span>
@@ -983,7 +898,7 @@ export function ReportsView() {
                           size="xs"
                           className="text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50"
                           onClick={() => setSelectedTxForVoid(t)}
-                          disabled={isVoided}
+                          disabled={isVoided || isReturned}
                           title="Void Entire Sale"
                         >
                           <Ban className="h-3 w-3 mr-1" /> Void
@@ -1010,7 +925,7 @@ export function ReportsView() {
           <div className="flex justify-between items-center">
             <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-emerald-600" />
-              Immutable Activity Audit Log ({auditLogs.length} Events)
+              Activity Audit Log ({filteredAuditLogs.length} Events)
             </h3>
             <span className="text-[11px] text-slate-400">
               Tracks Voids, Returns, Cash Drawer openings, Stock changes, and Staff access
@@ -1029,7 +944,7 @@ export function ReportsView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {auditLogs.map((log) => (
+                {filteredAuditLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-50 transition">
                     <td className="p-3 text-slate-500 whitespace-nowrap font-mono text-[11px]">
                       {new Date(log.timestamp || log.createdAt).toLocaleString("en-PH", {
@@ -1096,7 +1011,7 @@ export function ReportsView() {
               </tbody>
             </table>
 
-            {auditLogs.length === 0 && (
+            {filteredAuditLogs.length === 0 && (
               <div className="p-8 text-center text-slate-400 text-xs">
                 No audit events recorded yet.
               </div>
@@ -1111,6 +1026,7 @@ export function ReportsView() {
           isOpen={isZReadingOpen}
           onClose={() => setIsZReadingOpen(false)}
           settings={settings}
+          periodLabel={period.label}
           cashDrawer={cashDrawer}
           cashierName={currentStaff.name}
           transactions={validFinancialTxns}

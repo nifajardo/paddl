@@ -185,7 +185,7 @@ export function AppShell() {
           </span>
           <ChevronDown size={15} />
         </button>
-        <div className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Workspace navigation" tabIndex={0}>
           {navigation.map((item) => (
             <div key={item.id}>
               {"group" in item && <div className="nav-group">{item.group}</div>}
@@ -204,7 +204,7 @@ export function AppShell() {
               </button>
             </div>
           ))}
-        </div>
+        </nav>
         {appMode === "DEMO" && (
           <button className="demo-callout" onClick={() => setPresetOpen(true)}>
             <Sparkles size={19} />

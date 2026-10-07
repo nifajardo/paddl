@@ -353,12 +353,21 @@ select:focus-visible {
   color: #c1deb4;
   border-radius: 9px;
 }
+/* Compact scrollbars keep short windows usable without native arrow gutters. */
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #c4cfc9; border-radius: 8px; }
+*::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .sidebar-nav {
   margin-top: 16px;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
   flex: 1;
   min-height: 0;
 }
+.sidebar-nav::-webkit-scrollbar { display: none; }
 .nav-group {
   font-size: 9px;
   letter-spacing: 1.9px;
