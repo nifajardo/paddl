@@ -1,4 +1,5 @@
 "use client";
+import { SearchInput } from "@/components/ui/search-input";
 import JsBarcode from "jsbarcode";
 import { printDocument } from "@/lib/printing";
 
@@ -9,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Printer, Search, Tag, CheckSquare, Square, X } from "lucide-react";
+import { Printer, Tag, CheckSquare, Square, X } from "lucide-react";
 
 interface BarcodeLabelsModalProps {
   isOpen: boolean;
@@ -121,12 +122,11 @@ export function BarcodeLabelsModal({ isOpen, onClose }: BarcodeLabelsModalProps)
           <div className="print:hidden space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
             <div className="flex flex-col sm:flex-row gap-2 justify-between items-center">
               <div className="relative flex-1 w-full">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <Input
+                <SearchInput
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search products to tag..."
-                  className="pl-9 h-9 text-xs bg-white"
+                  className="h-9 text-xs bg-white"
                 />
               </div>
 

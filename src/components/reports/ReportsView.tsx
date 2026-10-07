@@ -1,4 +1,5 @@
 "use client";
+import { SearchInput } from "@/components/ui/search-input";
 
 import React, { useState, useMemo } from "react";
 import { useStore } from "@/context/StoreContext";
@@ -271,56 +272,18 @@ export function ReportsView() {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex items-center border-b border-slate-200 gap-2 overflow-x-auto text-xs font-semibold text-slate-600 pb-px">
-        <button
-          onClick={() => setActiveTab("FINANCIAL")}
-          className={`pb-2.5 px-3 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === "FINANCIAL"
-              ? "border-emerald-600 text-emerald-700"
-              : "border-transparent hover:text-slate-900"
-          }`}
-        >
-          <BarChart3 className="h-4 w-4" />
-          Financial P&L Summary
-        </button>
-
-        <button
-          onClick={() => setActiveTab("PRODUCT_SEARCH")}
-          className={`pb-2.5 px-3 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === "PRODUCT_SEARCH"
-              ? "border-emerald-600 text-emerald-700"
-              : "border-transparent hover:text-slate-900"
-          }`}
-        >
-          <Search className="h-4 w-4" />
-          Product Sales Drill-down
-        </button>
-
-        <button
-          onClick={() => setActiveTab("TRANSACTIONS")}
-          className={`pb-2.5 px-3 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === "TRANSACTIONS"
-              ? "border-emerald-600 text-emerald-700"
-              : "border-transparent hover:text-slate-900"
-          }`}
-        >
-          <Receipt className="h-4 w-4" />
-          Transaction History ({filteredTxns.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab("AUDIT")}
-          className={`pb-2.5 px-3 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
-            activeTab === "AUDIT"
-              ? "border-emerald-600 text-emerald-700"
-              : "border-transparent hover:text-slate-900"
-          }`}
-        >
-          <History className="h-4 w-4" />
-          System Audit Trail ({auditLogs.length})
-        </button>
-      </div>
+      <nav className="report-sections" aria-label="Report sections">
+        {([
+          ["FINANCIAL", "Financial P&L Summary", BarChart3],
+          ["PRODUCT_SEARCH", "Product Sales Drill-down", Search],
+          ["TRANSACTIONS", `Transaction History (${filteredTxns.length})`, Receipt],
+          ["AUDIT", `System Audit Trail (${filteredAuditLogs.length})`, History],
+        ] as const).map(([id, label, Icon]) => (
+          <button key={id} type="button" aria-pressed={activeTab === id} onClick={() => setActiveTab(id)}>
+            <Icon aria-hidden="true" /> <span>{label}</span>
+          </button>
+        ))}
+      </nav>
 
       {/* Universal Date Range Filter Bar */}
       <div className="min-w-0 bg-white p-4 rounded-xl border border-slate-200 space-y-3">
@@ -573,15 +536,14 @@ export function ReportsView() {
                 </div>
 
                 <div className="relative w-full sm:w-72">
-                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <Input
+                  <SearchInput
                     placeholder="Search product name or SKU..."
                     value={productSearch}
                     onChange={(e) => {
                       setProductSearch(e.target.value);
                       setSelectedDrillDownProduct(null);
                     }}
-                    className="pl-9 text-xs bg-slate-50 h-9"
+                    className="text-xs bg-slate-50 h-9"
                   />
                 </div>
               </div>
@@ -729,12 +691,11 @@ export function ReportsView() {
         <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-4">
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <Input
+              <SearchInput
                 placeholder="Search by receipt #, customer, cashier, or items..."
                 value={txSearch}
                 onChange={(e) => setTxSearch(e.target.value)}
-                className="pl-9 text-xs sm:text-sm bg-slate-50"
+                className="text-xs sm:text-sm bg-slate-50"
               />
             </div>
 

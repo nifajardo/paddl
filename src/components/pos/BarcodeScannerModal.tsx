@@ -1,11 +1,12 @@
 "use client";
+import { SearchInput } from "@/components/ui/search-input";
 
 import React, { useState } from "react";
 import { Product } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ScanBarcode, Plus, Search, Check } from "lucide-react";
+import { ScanBarcode, Plus, Check } from "lucide-react";
 
 interface BarcodeScannerModalProps {
   isOpen: boolean;
@@ -69,15 +70,14 @@ export function BarcodeScannerModal({
 
           <div className="flex gap-2">
             <div className="relative flex-1">
-              <ScanBarcode className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-              <Input
+              <SearchInput icon={ScanBarcode}
                 placeholder="Scan or enter barcode (e.g. 4800016010015)..."
                 value={barcodeInput}
                 onChange={(e) => {
                   setBarcodeInput(e.target.value);
                   setErrorMsg("");
                 }}
-                className="pl-9 text-xs"
+                className="text-xs"
                 autoFocus
               />
             </div>

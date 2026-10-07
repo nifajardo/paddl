@@ -1,4 +1,5 @@
 "use client";
+import { SearchInput } from "@/components/ui/search-input";
 import { toast } from "sonner";
 import { businessDate, csvCell, downloadFile } from "@/lib/commerce";
 
@@ -14,7 +15,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { 
   Package, 
   Plus, 
-  Search, 
   AlertTriangle, 
   ArrowUpDown, 
   Edit3, 
@@ -37,13 +37,13 @@ import { BarcodeLabelsModal } from "./BarcodeLabelsModal";
 const EMOJI_OPTIONS = [
   "🥫", "🥤", "🍞", "🍚", "🧴", "🧼", "🚬", "📱", 
   "💊", "🩹", "💉", "🧪", "🩺", 
-  "🏍️", "🛢️", "🔧", "⚙️", "🪛", "⚡", 
+  "🏍️", "🛢️", "🔧", "⚙️", "🪛", "⚡", "🛞", "🔩", "⛓️", "🔋", "🪫", "🪖", "🛠️", "💡",
   "🧋", "☕", "🧇", "🍟",
   "📦", "🏷️"
 ];
 
 export function InventoryView() {
-  const { products, settings, addProduct, updateProduct, deleteProduct, adjustProductStock } = useStore();
+  const { products, settings, currentShopPreset, addProduct, updateProduct, deleteProduct, adjustProductStock } = useStore();
 
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
@@ -108,6 +108,8 @@ export function InventoryView() {
   const [formName, setFormName] = useState("");
   const [formBarcode, setFormBarcode] = useState("");
   const [formCategory, setFormCategory] = useState<ProductCategory>("Snacks & Sweets");
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+  const [customCategory, setCustomCategory] = useState("");
   const [formCostPrice, setFormCostPrice] = useState<string>("");
   const [formSellingPrice, setFormSellingPrice] = useState<string>("");
   const [formStock, setFormStock] = useState<string>("");
@@ -174,9 +176,11 @@ export function InventoryView() {
 
   // Open modal handlers
   const handleOpenAdd = () => {
+    setIsCustomCategory(false);
+    setCustomCategory("");
     setFormName("");
     setFormBarcode(`BAR-${Date.now().toString().slice(-6)}`);
-    setFormCategory("Snacks & Sweets");
+    setFormCategory(products[0]?.category || ({ SARI_SARI: "Snacks & Sweets", MOTOR_SHOP: "Engine Oils & Fluids", PHARMACY: "Over-The-Counter (OTC)", MILK_TEA: "Milk Tea Classics" })[currentShopPreset]);
     setFormCostPrice("");
     setFormSellingPrice("");
     setFormStock("20");
@@ -194,6 +198,8 @@ export function InventoryView() {
   };
 
   const handleOpenEdit = (p: Product) => {
+    setIsCustomCategory(false);
+    setCustomCategory("");
     setEditingProduct(p);
     setFormName(p.name);
     setFormBarcode(p.barcode);
@@ -227,11 +233,17 @@ export function InventoryView() {
     const price = parseFloat(formSellingPrice) || 0;
     const stock = Number(formStock);
     const minAlert = formMinStock === "" ? 10 : Number(formMinStock);
+    const categoryName = (isCustomCategory ? customCategory : formCategory).trim();
+    if (!categoryName || categoryName.length > 80 || categoryName.toLowerCase() === "all") {
+      toast.error("Enter a category of 1–80 characters. All is reserved for filtering.");
+      return;
+    }
+    const category = availableCategories.find(cat => cat.toLowerCase() === categoryName.toLowerCase()) || categoryName;
 
     const payload = {
       name: formName.trim(),
       barcode: formBarcode.trim() || `SKU-${Date.now().toString().slice(-6)}`,
-      category: formCategory,
+      category,
       costPrice: cost,
       sellingPrice: price,
       stock,
@@ -254,6 +266,10 @@ export function InventoryView() {
     } else {
       addProduct(payload);
       setIsAddModalOpen(false);
+      setSearch("");
+      setSelectedCategory(category);
+      setStockFilter("ALL");
+      toast.success(`${payload.name} added to ${category}.`);
     }
     } catch (error) { toast.error((error as Error).message); }
   };
@@ -389,12 +405,11 @@ export function InventoryView() {
       <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <Input
+            <SearchInput
               placeholder="Search by product name, generic, barcode, or SKU..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 text-xs sm:text-sm bg-slate-50"
+              className="text-xs sm:text-sm bg-slate-50"
             />
           </div>
 
@@ -634,9 +649,10 @@ export function InventoryView() {
                 >
                   {EMOJI_OPTIONS.map((em) => (
                     <option key={em} value={em}>
-                      {em}
+                      {em} {({ "🏍️": "Motorcycle", "🛢️": "Oil & fluids", "🛞": "Wheel / tire", "⚙️": "Bearing / gear", "🔩": "Bolt / fastener", "⛓️": "Chain", "🔋": "Battery", "🪫": "Battery service", "🪖": "Helmet / safety", "🛠️": "Tools / repair", "💡": "Lights", "🔧": "Parts / service", "🪛": "Screwdriver", "⚡": "Electrical" } as Record<string, string>)[em] || ""}
                     </option>
                   ))}
+                  {!EMOJI_OPTIONS.includes(formEmoji) && <option value={formEmoji}>{formEmoji || "No icon"}</option>}
                 </select>
               </div>
             </div>
@@ -647,8 +663,8 @@ export function InventoryView() {
                 <Label htmlFor="prod-cat" className="text-xs">Category</Label>
                 <select
                   id="prod-cat"
-                  value={formCategory}
-                  onChange={(e) => setFormCategory(e.target.value as any)}
+                  value={isCustomCategory ? "" : formCategory}
+                  onChange={(e) => { setIsCustomCategory(e.target.value === ""); if (e.target.value) setFormCategory(e.target.value); }}
                   className="w-full h-9 px-2 text-xs rounded-md border border-slate-200 bg-white"
                 >
                   {availableCategories.map((cat) => (
@@ -656,7 +672,15 @@ export function InventoryView() {
                       {cat}
                     </option>
                   ))}
+                  <option value="">+ Custom category…</option>
                 </select>
+                {isCustomCategory && (
+                  <div className="space-y-1 pt-2">
+                    <Label htmlFor="prod-custom-category">Custom category name</Label>
+                    <Input id="prod-custom-category" required maxLength={80} value={customCategory} onChange={e => setCustomCategory(e.target.value)} placeholder="e.g. Bearings & seals" />
+                    <p className="text-[11px] text-slate-500">Saved with this item and available for future items and filters.</p>
+                  </div>
+                )}
               </div>
               <div className="space-y-1">
                 <Label htmlFor="prod-barcode" className="text-xs">Barcode / SKU</Label>

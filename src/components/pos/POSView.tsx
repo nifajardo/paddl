@@ -1,4 +1,5 @@
 "use client";
+import { SearchInput } from "@/components/ui/search-input";
 
 import React, { useState, useMemo, useEffect } from "react";
 import { useStore } from "@/context/StoreContext";
@@ -9,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { 
-  Search, 
   ShoppingCart, 
   Plus, 
   Minus, 
@@ -356,12 +356,11 @@ export function POSView() {
         {/* Search & Actions Bar */}
         <div className="p-3 sm:p-4 border-b border-slate-200 flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between bg-white shrink-0">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <Input
+            <SearchInput
               placeholder="Search by product name, barcode, or SKU..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 text-xs sm:text-sm bg-slate-50 border-slate-200"
+              className="text-xs sm:text-sm bg-slate-50 border-slate-200"
             />
           </div>
 

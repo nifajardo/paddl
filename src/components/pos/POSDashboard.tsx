@@ -1,4 +1,5 @@
 "use client";
+import { SearchInput } from "@/components/ui/search-input";
 
 import { useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -7,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Search, ShoppingCart, Plus, Minus, CreditCard, Banknote, Trash2 } from "lucide-react";
+import { ShoppingCart, Plus, Minus, CreditCard, Banknote, Trash2 } from "lucide-react";
 
 // Dummy data for initial UI build
 const DUMMY_PRODUCTS = [
@@ -119,11 +120,10 @@ export function POSDashboard() {
           </div>
           <div className="flex items-center gap-4">
             <div className="relative w-64 hidden sm:block">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
+              <SearchInput
                 type="search"
                 placeholder="Search products..."
-                className="pl-9 bg-slate-100 border-none"
+                className="bg-slate-100 border-none"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -155,11 +155,10 @@ export function POSDashboard() {
         {/* Categories Mobile Search */}
         <div className="px-4 py-3 sm:hidden">
           <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
+            <SearchInput
               type="search"
               placeholder="Search products..."
-              className="pl-9 bg-slate-100"
+              className="bg-slate-100"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />

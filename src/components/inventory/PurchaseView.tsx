@@ -1,6 +1,7 @@
 "use client";
+import { SearchInput } from "@/components/ui/search-input";
 import { useState } from "react";
-import { Check, Package, Plus, Search, Trash2, Truck } from "lucide-react";
+import { Check, Package, Plus, Trash2, Truck } from "lucide-react";
 import { useStore, type StockReceipt } from "@/context/StoreContext";
 import { peso } from "@/lib/commerce";
 import { toast } from "sonner";
@@ -96,12 +97,8 @@ export function PurchaseView() {
           <label className="field-label">
             Find a product
             <div className="relative">
-              <Search
-                className="absolute left-3 top-3 text-slate-400"
-                size={17}
-              />
-              <input
-                className="field-input pl-10"
+              <SearchInput
+                className="field-input "
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search name or barcode…"

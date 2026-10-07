@@ -1,6 +1,7 @@
 "use client";
+import { SearchInput } from "@/components/ui/search-input";
 import { useState } from "react";
-import { Download, ReceiptText, Search, Undo2, Ban } from "lucide-react";
+import { Download, ReceiptText, Undo2, Ban } from "lucide-react";
 import { useStore } from "@/context/StoreContext";
 import {
   businessDate,
@@ -82,10 +83,9 @@ export function SalesHistory() {
       </div>
       <div className="panel p-4 flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-48">
-          <Search size={17} className="absolute left-3 top-3 text-slate-400" />
-          <input
+          <SearchInput
             aria-label="Search sales"
-            className="field-input pl-10"
+            className="field-input"
             placeholder="Receipt, customer, or product…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}

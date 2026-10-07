@@ -935,6 +935,14 @@ select:focus-visible {
 .field-input::placeholder {
   color: #a0b0a5;
 }
+.search-input { position: relative; width: 100%; min-width: 0; }
+.search-input > input { padding-left: 40px; }
+.search-input-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
+.report-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; flex-shrink: 0; }
+.report-sections button { min-width: 0; min-height: 48px; padding: 12px; border: 1px solid #dce5df; border-radius: 9px; display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; text-align: left; background: white; color: #61796b; }
+.report-sections button svg { flex-shrink: 0; width: 16px; height: 16px; }
+.report-sections button[aria-pressed="true"] { color: #087f65; background: #eaf7ef; border-color: #75bea1; }
+@media (min-width: 1200px) { .report-sections { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .receiving-line {
   padding: 14px;
   border: 1px solid #e4ebe5;

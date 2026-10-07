@@ -1,4 +1,5 @@
 "use client";
+import { SearchInput } from "@/components/ui/search-input";
 
 import React, { useState, useMemo } from "react";
 import { useStore } from "@/context/StoreContext";
@@ -13,7 +14,6 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { 
   BookOpen, 
   Plus, 
-  Search, 
   Phone, 
   UserCheck, 
   AlertTriangle, 
@@ -279,12 +279,11 @@ export function CreditView() {
       <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-4">
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <Input
+            <SearchInput
               placeholder="Search customer by name or phone number..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 text-xs sm:text-sm bg-slate-50"
+              className="text-xs sm:text-sm bg-slate-50"
             />
           </div>
 

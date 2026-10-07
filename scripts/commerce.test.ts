@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   validateCheckout,
+  validateProduct,
   calculateReturn,
   linePaidTotal,
   retainedCost,
@@ -33,6 +34,12 @@ const customer: Customer = {
   totalDebt: 90,
   createdAt: "",
 };
+test("custom product categories are accepted and reserved or empty categories rejected", () => {
+  assert.doesNotThrow(() => validateProduct({ ...product, category: "Bearings & Seals" }));
+  for (const category of ["", "  ", "All", "all", "x".repeat(81)]) {
+    assert.throws(() => validateProduct({ ...product, category }), /category/);
+  }
+});
 function checkout(overrides = {}) {
   return {
     items: [{ product, quantity: 1, subtotal: 15, customDiscount: 0 }],

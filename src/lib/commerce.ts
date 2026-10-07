@@ -34,6 +34,7 @@ export function positive(n: number, label: string) {
 }
 export function validateProduct(p: Product) {
   assert(p.name.trim(), "Enter a product name.");
+  assert(typeof p.category === "string" && p.category.trim().length > 0 && p.category.trim().length <= 80 && p.category.trim().toLowerCase() !== "all", "Enter a category of 1–80 characters. All is reserved for filtering.");
   for (const [label, n] of Object.entries({
     Stock: p.stock,
     Cost: p.costPrice,
