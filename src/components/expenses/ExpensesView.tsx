@@ -109,10 +109,10 @@ export function ExpensesView() {
     e.preventDefault();
     if (cashDrawer.status === "OPEN") {
       const actual = parseFloat(actualClosingCount) || 0;
-      closeCashDrawer(actual, drawerNotes);
+      if (!closeCashDrawer(actual, drawerNotes)) return;
     } else {
       const openAmt = parseFloat(openingFloat) || 0;
-      openCashDrawer(openAmt, drawerNotes);
+      if (!openCashDrawer(openAmt, drawerNotes)) return;
     }
     setIsDrawerShiftOpen(false);
   };
@@ -121,7 +121,7 @@ export function ExpensesView() {
     e.preventDefault();
     const amt = parseFloat(adjustAmt) || 0;
     if (amt <= 0) return;
-    logCashAdjustment(amt, adjustType, adjustReason.trim());
+    if (!logCashAdjustment(amt, adjustType, adjustReason.trim())) return;
     setIsCashAdjustOpen(false);
     setAdjustAmt("");
     setAdjustReason("");

@@ -1,5 +1,6 @@
 "use client";
 import { toast } from "sonner";
+import { businessDate, csvCell, downloadFile } from "@/lib/commerce";
 
 import React, { useState, useMemo, useEffect } from "react";
 import { useStore } from "@/context/StoreContext";
@@ -224,8 +225,8 @@ export function InventoryView() {
     try {
     const cost = parseFloat(formCostPrice) || 0;
     const price = parseFloat(formSellingPrice) || 0;
-    const stock = parseInt(formStock) || 0;
-    const minAlert = parseInt(formMinStock) || 10;
+    const stock = Number(formStock);
+    const minAlert = formMinStock === "" ? 10 : Number(formMinStock);
 
     const payload = {
       name: formName.trim(),
@@ -248,7 +249,7 @@ export function InventoryView() {
     };
 
     if (editingProduct) {
-      updateProduct(editingProduct.id, payload);
+      if (!updateProduct(editingProduct.id, payload)) return;
       setEditingProduct(null);
     } else {
       addProduct(payload);
@@ -261,28 +262,15 @@ export function InventoryView() {
     e.preventDefault();
     try {
     if (!adjustingProduct) return;
-    const delta = parseInt(adjustDelta) || 0;
-    adjustProductStock(adjustingProduct.id, delta, adjustReason);
+    const delta = Number(adjustDelta);
+    if (!adjustProductStock(adjustingProduct.id, delta, adjustReason)) return;
     setAdjustingProduct(null);
     } catch (error) { toast.error((error as Error).message); }
   };
 
   const handleExportCSV = () => {
-    const headers = "ID,Name,Barcode,Category,CostPrice,SellingPrice,Stock,Unit,Valuation\n";
-    const rows = products
-      .map(
-        (p) =>
-          `"${p.id}","${p.name}","${p.barcode}","${p.category}",${p.costPrice},${p.sellingPrice},${
-            p.stock
-          },"${p.unit}",${(p.costPrice * p.stock).toFixed(2)}`
-      )
-      .join("\n");
-    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `peddlr_inventory_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
+    const rows = [["ID", "Name", "Barcode", "Category", "Cost", "Price", "Stock", "Unit", "Value"], ...products.map(p => [p.id, p.name, p.barcode, p.category, p.costPrice, p.sellingPrice, p.stock, p.unit, (p.costPrice * p.stock).toFixed(2)])];
+    downloadFile("paddl-inventory-" + businessDate() + ".csv", "\uFEFF" + rows.map(r => r.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8");
   };
 
   // Profit Margins in Form

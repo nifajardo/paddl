@@ -302,7 +302,7 @@ ${settings.receiptFooterMessage}
             </div>
             <p className="text-[10px] font-mono text-slate-500">*{transaction.receiptNumber}*</p>
             <p className="text-[11px] text-slate-600 font-sans italic pt-1">{settings.receiptFooterMessage}</p>
-            <p className="text-[9px] text-slate-400 font-sans">Paddl+ Pro • Philippine Retail POS</p>
+            <p className="text-[9px] text-slate-400 font-sans">Paddl · Acknowledgment only, not a tax invoice</p>
           </div>
         </div>
 

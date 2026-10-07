@@ -12,23 +12,304 @@ export function PurchaseView() {
   const [method, setMethod] = useState<StockReceipt["paymentMethod"]>("GCASH");
   const [lines, setLines] = useState<StockReceipt["lines"]>([]);
   const [saving, setSaving] = useState(false);
-  const low = products.filter(p => p.isActive && p.stock <= p.minStockAlert);
-  function add(pid: string) { const p = products.find(p => p.id === pid)!; if (lines.some(l => l.productId === pid)) return; setLines([...lines, { productId: pid, quantity: Math.max(1, p.minStockAlert * 2 - p.stock), cost: p.costPrice }]); }
+  const low = products.filter((p) => p.isActive && p.stock <= p.minStockAlert);
+  function add(pid: string) {
+    const p = products.find((p) => p.id === pid)!;
+    if (lines.some((l) => l.productId === pid)) return;
+    setLines([
+      ...lines,
+      {
+        productId: pid,
+        quantity: Math.max(1, p.minStockAlert * 2 - p.stock),
+        cost: p.costPrice,
+      },
+    ]);
+  }
   const total = lines.reduce((s, l) => s + l.quantity * l.cost, 0);
-  function submit(e: React.FormEvent) { e.preventDefault(); if (saving) return; setSaving(true); try { const receipt = receiveStock({ supplier, reference, paymentMethod: method, lines }); setLines([]); setReference(""); toast.success("Stock received. " + peso(receipt.total) + " recorded in your expense ledger."); } catch (e) { toast.error((e as Error).message); } finally { setSaving(false); } }
-  return <div className="workspace-page">
-    <div className="page-heading"><div><div className="eyebrow">KEEP YOUR SHELVES READY</div><h1>Purchases & receiving</h1><p>Receive a delivery, update stock, and record payment in one step.</p></div><span className="subtle-tag"><Truck size={16} /> {stockReceipts.length} deliveries recorded</span></div>
-    <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-5 items-start">
-      <form className="panel p-6 space-y-5" onSubmit={submit}><div><h2 className="font-bold text-lg">Receive stock</h2><p className="text-sm text-slate-500 mt-1">Enter only the items you have physically received.</p></div>
-        <div className="grid sm:grid-cols-2 gap-4"><label className="field-label">Supplier<input className="field-input" value={supplier} onChange={e => setSupplier(e.target.value)} placeholder="e.g. Metro Wholesale" required /></label><label className="field-label">Supplier receipt / reference<input className="field-input" value={reference} onChange={e => setReference(e.target.value)} placeholder="Optional invoice number" /></label></div>
-        <label className="field-label">Find a product<div className="relative"><Search className="absolute left-3 top-3 text-slate-400" size={17} /><input className="field-input pl-10" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name or barcode…" /></div></label>
-        {search && <div className="border rounded-xl max-h-48 overflow-y-auto">{products.filter(p => p.isActive && (p.name + p.barcode).toLowerCase().includes(search.toLowerCase())).map(p => <button key={p.id} type="button" disabled={lines.some(l => l.productId === p.id)} className="w-full p-3 flex items-center gap-3 text-left text-sm hover:bg-emerald-50 disabled:opacity-40" onClick={() => { add(p.id); setSearch(""); }}><span>{p.emoji}</span><span className="flex-1">{p.name}</span><Plus size={16} /></button>)}</div>}
-        {!lines.length && <div className="empty-state border border-dashed rounded-xl"><Package /><h3>Your delivery starts here</h3><p>Search your catalog or add a low-stock item from the list.</p></div>}
-        {lines.length > 0 && <div className="space-y-3">{lines.map((l, i) => <div key={l.productId} className="receiving-line"><div className="font-semibold text-sm">{products.find(p => p.id === l.productId)?.name}</div><div className="flex gap-3 items-end"><label className="field-label flex-1">Quantity<input className="field-input" type="number" min=".001" step="any" required value={l.quantity} onChange={e => setLines(lines.map((x, j) => j === i ? { ...x, quantity: Number(e.target.value) } : x))} /></label><label className="field-label flex-1">Unit cost (₱)<input className="field-input" type="number" min="0" step=".01" required value={l.cost} onChange={e => setLines(lines.map((x, j) => j === i ? { ...x, cost: Number(e.target.value) } : x))} /></label><button type="button" className="icon-button mb-1" aria-label="Remove delivery item" onClick={() => setLines(lines.filter((_, j) => j !== i))}><Trash2 size={17} /></button></div></div>)}</div>}
-        <div className="border-t pt-5 flex flex-wrap items-end gap-4"><label className="field-label flex-1">Paid using<select className="field-input" value={method} onChange={e => setMethod(e.target.value as StockReceipt["paymentMethod"])}><option value="GCASH">GCash</option><option value="CASH">Cash from drawer</option><option value="BANK">Bank transfer</option></select></label><div className="text-right"><span className="text-xs text-slate-500 block">Delivery total</span><strong className="text-2xl">{peso(total)}</strong></div></div><p className="text-xs text-slate-500">Item costs use a weighted average. Past sales keep their original costs. Supplier purchases are recorded as stock spending, separate from operating expenses.</p><button disabled={!lines.length || saving} className="primary-button w-full justify-center"><Check size={17} /> Receive & record payment</button>
-      </form>
-      <section className="panel"><div className="panel-heading"><div><h2>Restock suggestions</h2><p>{low.length} products at or below reorder level</p></div></div>{low.map(p => <button key={p.id} onClick={() => add(p.id)} disabled={lines.some(l => l.productId === p.id)} className="restock-row"><span className="product-symbol">{p.emoji}</span><span className="min-w-0 flex-1"><strong>{p.name}</strong><small>{p.stock} left · reorder at {p.minStockAlert}</small></span>{lines.some(l => l.productId === p.id) ? <Check size={16} /> : <Plus size={16} />}</button>)}{!low.length && <p className="p-6 text-sm text-emerald-700">Your shelves are well stocked.</p>}</section>
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    try {
+      const receipt = receiveStock({
+        supplier,
+        reference,
+        paymentMethod: method,
+        lines,
+      });
+      setLines([]);
+      setReference("");
+      toast.success(
+        "Stock received. " +
+          peso(receipt.total) +
+          " recorded in your expense ledger.",
+      );
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="workspace-page">
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">KEEP YOUR SHELVES READY</div>
+          <h1>Purchases & receiving</h1>
+          <p>
+            Receive a delivery, update stock, and record payment in one step.
+          </p>
+        </div>
+        <span className="subtle-tag">
+          <Truck size={16} /> {stockReceipts.length} deliveries recorded
+        </span>
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-5 items-start">
+        <form className="panel p-6 space-y-5" onSubmit={submit}>
+          <div>
+            <h2 className="font-bold text-lg">Receive stock</h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Enter only the items you have physically received.
+            </p>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <label className="field-label">
+              Supplier
+              <input
+                className="field-input"
+                value={supplier}
+                onChange={(e) => setSupplier(e.target.value)}
+                placeholder="e.g. Metro Wholesale"
+                required
+              />
+            </label>
+            <label className="field-label">
+              Supplier receipt / reference
+              <input
+                className="field-input"
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                placeholder="Optional invoice number"
+              />
+            </label>
+          </div>
+          <label className="field-label">
+            Find a product
+            <div className="relative">
+              <Search
+                className="absolute left-3 top-3 text-slate-400"
+                size={17}
+              />
+              <input
+                className="field-input pl-10"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name or barcode…"
+              />
+            </div>
+          </label>
+          {search && (
+            <div className="border rounded-xl max-h-48 overflow-y-auto">
+              {products
+                .filter(
+                  (p) =>
+                    p.isActive &&
+                    (p.name + p.barcode)
+                      .toLowerCase()
+                      .includes(search.toLowerCase()),
+                )
+                .map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    disabled={lines.some((l) => l.productId === p.id)}
+                    className="w-full p-3 flex items-center gap-3 text-left text-sm hover:bg-emerald-50 disabled:opacity-40"
+                    onClick={() => {
+                      add(p.id);
+                      setSearch("");
+                    }}
+                  >
+                    <span>{p.emoji}</span>
+                    <span className="flex-1">{p.name}</span>
+                    <Plus size={16} />
+                  </button>
+                ))}
+            </div>
+          )}
+          {!lines.length && (
+            <div className="empty-state border border-dashed rounded-xl">
+              <Package />
+              <h3>Your delivery starts here</h3>
+              <p>Search your catalog or add a low-stock item from the list.</p>
+            </div>
+          )}
+          {lines.length > 0 && (
+            <div className="space-y-3">
+              {lines.map((l, i) => (
+                <div key={l.productId} className="receiving-line">
+                  <div className="font-semibold text-sm">
+                    {products.find((p) => p.id === l.productId)?.name}
+                  </div>
+                  <div className="flex gap-3 items-end">
+                    <label className="field-label flex-1">
+                      Quantity
+                      <input
+                        className="field-input"
+                        type="number"
+                        min=".001"
+                        step="any"
+                        required
+                        value={l.quantity}
+                        onChange={(e) =>
+                          setLines(
+                            lines.map((x, j) =>
+                              j === i
+                                ? { ...x, quantity: Number(e.target.value) }
+                                : x,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="field-label flex-1">
+                      Unit cost (₱)
+                      <input
+                        className="field-input"
+                        type="number"
+                        min="0"
+                        step=".01"
+                        required
+                        value={l.cost}
+                        onChange={(e) =>
+                          setLines(
+                            lines.map((x, j) =>
+                              j === i
+                                ? { ...x, cost: Number(e.target.value) }
+                                : x,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="icon-button mb-1"
+                      aria-label="Remove delivery item"
+                      onClick={() => setLines(lines.filter((_, j) => j !== i))}
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="border-t pt-5 flex flex-wrap items-end gap-4">
+            <label className="field-label flex-1">
+              Paid using
+              <select
+                className="field-input"
+                value={method}
+                onChange={(e) =>
+                  setMethod(e.target.value as StockReceipt["paymentMethod"])
+                }
+              >
+                <option value="GCASH">GCash</option>
+                <option value="CASH">Cash from drawer</option>
+                <option value="BANK">Bank transfer</option>
+              </select>
+            </label>
+            <div className="text-right">
+              <span className="text-xs text-slate-500 block">
+                Delivery total
+              </span>
+              <strong className="text-2xl">{peso(total)}</strong>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500">
+            Item costs use a weighted average. Past sales keep their original
+            costs. Supplier purchases are recorded as stock spending, separate
+            from operating expenses.
+          </p>
+          <button
+            disabled={!lines.length || saving}
+            className="primary-button w-full justify-center"
+          >
+            <Check size={17} /> Receive & record payment
+          </button>
+        </form>
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Restock suggestions</h2>
+              <p>{low.length} products at or below reorder level</p>
+            </div>
+          </div>
+          {low.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => add(p.id)}
+              disabled={lines.some((l) => l.productId === p.id)}
+              className="restock-row"
+            >
+              <span className="product-symbol">{p.emoji}</span>
+              <span className="min-w-0 flex-1">
+                <strong>{p.name}</strong>
+                <small>
+                  {p.stock} left · reorder at {p.minStockAlert}
+                </small>
+              </span>
+              {lines.some((l) => l.productId === p.id) ? (
+                <Check size={16} />
+              ) : (
+                <Plus size={16} />
+              )}
+            </button>
+          ))}
+          {!low.length && (
+            <p className="p-6 text-sm text-emerald-700">
+              Your shelves are well stocked.
+            </p>
+          )}
+        </section>
+      </div>
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Receiving history</h2>
+            <p>A record of every completed delivery.</p>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="clean-table">
+            <thead>
+              <tr>
+                <th>Supplier</th>
+                <th>Reference</th>
+                <th>Received</th>
+                <th>Items</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stockReceipts.map((r) => (
+                <tr key={r.id}>
+                  <td className="font-semibold">{r.supplier}</td>
+                  <td>{r.reference || "—"}</td>
+                  <td>{new Date(r.date).toLocaleString("en-PH")}</td>
+                  <td>{r.lines.length}</td>
+                  <td>{peso(r.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!stockReceipts.length && (
+            <p className="text-center p-8 text-sm text-slate-500">
+              Your completed deliveries will appear here.
+            </p>
+          )}
+        </div>
+      </section>
     </div>
-    <section className="panel"><div className="panel-heading"><div><h2>Receiving history</h2><p>A record of every completed delivery.</p></div></div><div className="overflow-x-auto"><table className="clean-table"><thead><tr><th>Supplier</th><th>Reference</th><th>Received</th><th>Items</th><th>Total</th></tr></thead><tbody>{stockReceipts.map(r => <tr key={r.id}><td className="font-semibold">{r.supplier}</td><td>{r.reference || "—"}</td><td>{new Date(r.date).toLocaleString("en-PH")}</td><td>{r.lines.length}</td><td>{peso(r.total)}</td></tr>)}</tbody></table>{!stockReceipts.length && <p className="text-center p-8 text-sm text-slate-500">Your completed deliveries will appear here.</p>}</div></section>
-  </div>;
+  );
 }

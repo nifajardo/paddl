@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import { useStore } from "@/context/StoreContext";
-import { businessDate, retainedCost, netSale } from "@/lib/commerce";
+import { businessDate, retainedCost, netSale, csvCell, downloadFile } from "@/lib/commerce";
 import { Transaction, Product } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -299,21 +299,8 @@ export function ReportsView() {
   }, [filteredTxns, txSearch, txStatusFilter, txPaymentFilter]);
 
   const handleExportReportCSV = () => {
-    const headers = "ReceiptNumber,Date,Customer,Cashier,PaymentMethod,Subtotal,Discount,Total,Status\n";
-    const rows = filteredTxns
-      .map(
-        (t) =>
-          `"${t.receiptNumber}","${t.createdAt}","${t.customerName || "Walk-in"}","${
-            t.cashierName
-          }","${t.paymentMethod}",${t.subtotal},${t.discountAmount},${t.total},"${t.status}"`
-      )
-      .join("\n");
-    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `paddl_sales_report_${timeframe.toLowerCase()}_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
+    const rows = [["Receipt", "Date", "Customer", "Cashier", "Payment", "Subtotal", "Discount", "Total", "Refunds", "Net", "Status"], ...filteredTxns.map(t => [t.receiptNumber, t.createdAt, t.customerName || "Walk-in", t.cashierName, t.paymentMethod, t.subtotal, t.discountAmount, t.total, t.refundedAmount || 0, netSale(t), t.status])];
+    downloadFile("paddl-report-" + businessDate() + ".csv", "\uFEFF" + rows.map(r => r.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8");
   };
 
   return (
@@ -326,7 +313,7 @@ export function ReportsView() {
             Financial Reports & Business Intelligence
           </h1>
           <p className="text-xs sm:text-sm text-slate-500">
-            Real-time P&L analytics, product sales drill-down, return tracking, and BIR-aligned audit slips
+            Management estimates for sales in the selected period, including their recorded returns.
           </p>
         </div>
 
@@ -337,7 +324,7 @@ export function ReportsView() {
             className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs h-9 font-semibold gap-1.5 shadow-sm"
           >
             <Printer className="h-3.5 w-3.5" />
-            Z-Reading Daily Audit
+            Print sales summary
           </Button>
 
           <Button

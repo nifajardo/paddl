@@ -34,7 +34,7 @@ export function VoidTransactionModal({
   transaction,
   onSuccess,
 }: VoidTransactionModalProps) {
-  const { voidTransaction, currentStaff, verifyOwnerPin } = useStore();
+  const { voidTransaction, currentStaff, verifyOwnerPin, hasPermission } = useStore();
 
   const [selectedReason, setSelectedReason] = useState(COMMON_VOID_REASONS[0]);
   const [customReason, setCustomReason] = useState("");
@@ -46,7 +46,7 @@ export function VoidTransactionModal({
 
   if (!isOpen || !transaction) return null;
 
-  const requiresPin = currentStaff.role === "CASHIER";
+  const requiresPin = !hasPermission("canVoidTransactions");
   const finalReason = selectedReason === "Other reason (specify below)" ? customReason.trim() : selectedReason;
 
   const handleProceedToConfirm = (e: React.FormEvent) => {

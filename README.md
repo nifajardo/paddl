@@ -60,4 +60,4 @@ Cloud backup is manual, versioned snapshot storage. It is not real-time syncing,
 
 ## Checks
 
-`npm test` runs financial/domain regression tests with Node's test runner. `npm run typecheck` checks all TypeScript. `npm run build` produces the production build. UI verification is performed against the local preview; the original repository also contains legacy lint findings in older components.
+`npm test` runs financial/domain regression tests with Node's test runner. `npm run typecheck` checks all TypeScript. `npm run build` produces the production build. UI verification is performed against the local preview. Lint was not run for this change.

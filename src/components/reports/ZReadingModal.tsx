@@ -84,7 +84,7 @@ export function ZReadingModal({
               <p className="text-[10px] text-slate-600 font-bold">TIN: {settings.tinNumber}</p>
             )}
             <div className="pt-1.5 font-bold uppercase tracking-wider text-[11px] text-slate-950">
-              *** DAILY Z-READING SLIP ***
+              *** SALES PERIOD SUMMARY ***
             </div>
             <div className="text-[10px] text-slate-500">
               Date: {currentDate} {currentTime}
@@ -97,11 +97,11 @@ export function ZReadingModal({
           {/* Sales & Discounts */}
           <div className="space-y-1 py-1 border-b border-dashed border-slate-400 text-[11px]">
             <div className="flex justify-between">
-              <span>Gross Sales ({transactions.length} orders):</span>
+              <span>Sales after discounts ({transactions.length} orders):</span>
               <span className="font-bold">₱{grossSales.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-slate-600">
-              <span>Demo discount &amp; Discounts:</span>
+              <span>Discounts (already included):</span>
               <span>-₱{totalDiscount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between font-bold text-xs pt-0.5 border-t border-slate-200">

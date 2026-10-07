@@ -2,24 +2,244 @@
 import { useState } from "react";
 import { Download, ReceiptText, Search, Undo2, Ban } from "lucide-react";
 import { useStore } from "@/context/StoreContext";
-import { businessDate, csvCell, downloadFile, netSale, peso } from "@/lib/commerce";
+import {
+  businessDate,
+  csvCell,
+  downloadFile,
+  netSale,
+  peso,
+} from "@/lib/commerce";
 import type { Transaction } from "@/types";
 import { ReceiptModal } from "@/components/pos/ReceiptModal";
 import { ReturnRefundModal } from "@/components/pos/ReturnRefundModal";
 import { VoidTransactionModal } from "@/components/pos/VoidTransactionModal";
 export function SalesHistory() {
   const { transactions, settings, hasPermission } = useStore();
-  const [search, setSearch] = useState(""); const [payment, setPayment] = useState("ALL"); const [date, setDate] = useState("");
-  const [selected, setSelected] = useState<{ id: string; action: "receipt" | "return" | "void" } | null>(null);
-  const selectedTxn = transactions.find(t => t.id === selected?.id) || null;
-  const rows = [...transactions].filter(t => (t.receiptNumber + " " + (t.customerName || "") + " " + t.items.map(i => i.product.name).join(" ")).toLowerCase().includes(search.toLowerCase()) && (payment === "ALL" || t.paymentMethod === payment) && (!date || businessDate(t.createdAt) === date)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  function exportCsv() { const data = [["Receipt", "Date", "Customer", "Payment", "Status", "Sale total", "Refunded", "Net sales"], ...rows.map(t => [t.receiptNumber, t.createdAt, t.customerName || "Walk-in", t.paymentMethod, t.status, t.total, t.refundedAmount || 0, netSale(t)])]; downloadFile("paddl-sales-" + businessDate() + ".csv", "\uFEFF" + data.map(r => r.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8"); }
-  return <div className="workspace-page"><div className="page-heading"><div><div className="eyebrow">EVERY SALE, ACCOUNTED FOR</div><h1>Sales history</h1><p>Find a receipt, process a return, or export your records.</p></div><button className="secondary-button" onClick={exportCsv}><Download size={16} /> Export filtered CSV</button></div>
-    <div className="panel p-4 flex flex-wrap gap-3"><div className="relative flex-1 min-w-48"><Search size={17} className="absolute left-3 top-3 text-slate-400" /><input aria-label="Search sales" className="field-input pl-10" placeholder="Receipt, customer, or product…" value={search} onChange={e => setSearch(e.target.value)} /></div><select aria-label="Filter payment method" className="field-input w-auto" value={payment} onChange={e => setPayment(e.target.value)}>{["ALL", "CASH", "GCASH", "MAYA", "SPLIT", "CREDIT_UTANG", "CARD", "BANK_TRANSFER"].map(m => <option key={m} value={m}>{m === "ALL" ? "All payments" : m.replaceAll("_", " ")}</option>)}</select><input aria-label="Sale date" type="date" className="field-input w-auto" value={date} onChange={e => setDate(e.target.value)} />{date && <button className="text-link" onClick={() => setDate("")}>Clear date</button>}</div>
-    <div className="flex justify-between text-sm text-slate-500"><span>{rows.length} matching sales</span><span>Net sales <strong className="text-slate-900 ml-2">{peso(rows.reduce((s, t) => s + netSale(t), 0))}</strong></span></div>
-    <section className="panel overflow-x-auto"><table className="clean-table"><thead><tr><th>Receipt / date</th><th>Customer</th><th>Payment</th><th>Status</th><th>Net amount</th><th>Actions</th></tr></thead><tbody>{rows.map(t => <tr key={t.id}><td><strong>{t.receiptNumber}</strong><small>{new Date(t.createdAt).toLocaleString("en-PH")}</small></td><td>{t.customerName || "Walk-in customer"}</td><td><span className="payment-tag">{t.paymentMethod.replace("CREDIT_UTANG", "Utang")}</span></td><td><span className={"status-tag " + (t.status === "COMPLETED" ? "complete" : "")}>{t.status.toLowerCase().replaceAll("_", " ")}</span></td><td className="font-semibold">{peso(netSale(t))}</td><td><div className="flex gap-1"><button className="icon-button" aria-label={"Receipt " + t.receiptNumber} onClick={() => setSelected({ id: t.id, action: "receipt" })}><ReceiptText size={17} /></button>{["COMPLETED", "PARTIALLY_RETURNED"].includes(t.status) && <button className="icon-button" aria-label={"Return " + t.receiptNumber} onClick={() => setSelected({ id: t.id, action: "return" })}><Undo2 size={17} /></button>}{t.status === "COMPLETED" && <button className="icon-button" aria-label={"Void " + t.receiptNumber} onClick={() => setSelected({ id: t.id, action: "void" })}><Ban size={17} /></button>}</div></td></tr>)}</tbody></table>{!rows.length && <div className="empty-state"><ReceiptText /><h3>No matching sales</h3><p>Try another search or clear the filters.</p></div>}</section>
-    {selected?.action === "receipt" && <ReceiptModal isOpen onClose={() => setSelected(null)} transaction={selectedTxn} settings={settings} isCopy />}
-    {selected?.action === "return" && <ReturnRefundModal isOpen onClose={() => setSelected(null)} transaction={selectedTxn} />}
-    {selected?.action === "void" && <VoidTransactionModal isOpen onClose={() => setSelected(null)} transaction={selectedTxn} />}
-  </div>;
+  const [search, setSearch] = useState("");
+  const [payment, setPayment] = useState("ALL");
+  const [date, setDate] = useState("");
+  const [selected, setSelected] = useState<{
+    id: string;
+    action: "receipt" | "return" | "void";
+  } | null>(null);
+  const selectedTxn = transactions.find((t) => t.id === selected?.id) || null;
+  const rows = [...transactions]
+    .filter(
+      (t) =>
+        (
+          t.receiptNumber +
+          " " +
+          (t.customerName || "") +
+          " " +
+          t.items.map((i) => i.product.name).join(" ")
+        )
+          .toLowerCase()
+          .includes(search.toLowerCase()) &&
+        (payment === "ALL" || t.paymentMethod === payment) &&
+        (!date || businessDate(t.createdAt) === date),
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  function exportCsv() {
+    const data = [
+      [
+        "Receipt",
+        "Date",
+        "Customer",
+        "Payment",
+        "Status",
+        "Sale total",
+        "Refunded",
+        "Net sales",
+      ],
+      ...rows.map((t) => [
+        t.receiptNumber,
+        t.createdAt,
+        t.customerName || "Walk-in",
+        t.paymentMethod,
+        t.status,
+        t.total,
+        t.refundedAmount || 0,
+        netSale(t),
+      ]),
+    ];
+    downloadFile(
+      "paddl-sales-" + businessDate() + ".csv",
+      "\uFEFF" + data.map((r) => r.map(csvCell).join(",")).join("\r\n"),
+      "text/csv;charset=utf-8",
+    );
+  }
+  return (
+    <div className="workspace-page">
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">EVERY SALE, ACCOUNTED FOR</div>
+          <h1>Sales history</h1>
+          <p>Find a receipt, process a return, or export your records.</p>
+        </div>
+        <button className="secondary-button" onClick={exportCsv}>
+          <Download size={16} /> Export filtered CSV
+        </button>
+      </div>
+      <div className="panel p-4 flex flex-wrap gap-3">
+        <div className="relative flex-1 min-w-48">
+          <Search size={17} className="absolute left-3 top-3 text-slate-400" />
+          <input
+            aria-label="Search sales"
+            className="field-input pl-10"
+            placeholder="Receipt, customer, or product…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <select
+          aria-label="Filter payment method"
+          className="field-input w-auto"
+          value={payment}
+          onChange={(e) => setPayment(e.target.value)}
+        >
+          {[
+            "ALL",
+            "CASH",
+            "GCASH",
+            "MAYA",
+            "SPLIT",
+            "CREDIT_UTANG",
+            "CARD",
+            "BANK_TRANSFER",
+          ].map((m) => (
+            <option key={m} value={m}>
+              {m === "ALL" ? "All payments" : m.replaceAll("_", " ")}
+            </option>
+          ))}
+        </select>
+        <input
+          aria-label="Sale date"
+          type="date"
+          className="field-input w-auto"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+        />
+        {date && (
+          <button className="text-link" onClick={() => setDate("")}>
+            Clear date
+          </button>
+        )}
+      </div>
+      <div className="flex justify-between text-sm text-slate-500">
+        <span>{rows.length} matching sales</span>
+        <span>
+          Net sales{" "}
+          <strong className="text-slate-900 ml-2">
+            {peso(rows.reduce((s, t) => s + netSale(t), 0))}
+          </strong>
+        </span>
+      </div>
+      <section className="panel overflow-x-auto">
+        <table className="clean-table">
+          <thead>
+            <tr>
+              <th>Receipt / date</th>
+              <th>Customer</th>
+              <th>Payment</th>
+              <th>Status</th>
+              <th>Net amount</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((t) => (
+              <tr key={t.id}>
+                <td>
+                  <strong>{t.receiptNumber}</strong>
+                  <small>{new Date(t.createdAt).toLocaleString("en-PH")}</small>
+                </td>
+                <td>{t.customerName || "Walk-in customer"}</td>
+                <td>
+                  <span className="payment-tag">
+                    {t.paymentMethod.replace("CREDIT_UTANG", "Utang")}
+                  </span>
+                </td>
+                <td>
+                  <span
+                    className={
+                      "status-tag " +
+                      (t.status === "COMPLETED" ? "complete" : "")
+                    }
+                  >
+                    {t.status.toLowerCase().replaceAll("_", " ")}
+                  </span>
+                </td>
+                <td className="font-semibold">{peso(netSale(t))}</td>
+                <td>
+                  <div className="flex gap-1">
+                    <button
+                      className="icon-button"
+                      aria-label={"Receipt " + t.receiptNumber}
+                      onClick={() =>
+                        setSelected({ id: t.id, action: "receipt" })
+                      }
+                    >
+                      <ReceiptText size={17} />
+                    </button>
+                    {["COMPLETED", "PARTIALLY_RETURNED"].includes(t.status) && (
+                      <button
+                        className="icon-button"
+                        aria-label={"Return " + t.receiptNumber}
+                        onClick={() =>
+                          setSelected({ id: t.id, action: "return" })
+                        }
+                      >
+                        <Undo2 size={17} />
+                      </button>
+                    )}
+                    {t.status === "COMPLETED" && (
+                      <button
+                        className="icon-button"
+                        aria-label={"Void " + t.receiptNumber}
+                        onClick={() =>
+                          setSelected({ id: t.id, action: "void" })
+                        }
+                      >
+                        <Ban size={17} />
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!rows.length && (
+          <div className="empty-state">
+            <ReceiptText />
+            <h3>No matching sales</h3>
+            <p>Try another search or clear the filters.</p>
+          </div>
+        )}
+      </section>
+      {selected?.action === "receipt" && (
+        <ReceiptModal
+          isOpen
+          onClose={() => setSelected(null)}
+          transaction={selectedTxn}
+          settings={settings}
+          isCopy
+        />
+      )}
+      {selected?.action === "return" && (
+        <ReturnRefundModal
+          isOpen
+          onClose={() => setSelected(null)}
+          transaction={selectedTxn}
+        />
+      )}
+      {selected?.action === "void" && (
+        <VoidTransactionModal
+          isOpen
+          onClose={() => setSelected(null)}
+          transaction={selectedTxn}
+        />
+      )}
+    </div>
+  );
 }

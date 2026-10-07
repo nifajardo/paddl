@@ -35,7 +35,7 @@ export function ReturnRefundModal({
   transaction,
   onSuccess,
 }: ReturnRefundModalProps) {
-  const { processReturn, currentStaff, verifyOwnerPin } = useStore();
+  const { processReturn, currentStaff, verifyOwnerPin, hasPermission } = useStore();
 
   // Selected quantities to return per product ID
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
@@ -62,7 +62,7 @@ export function ReturnRefundModal({
 
   if (!isOpen || !transaction) return null;
 
-  const requiresPin = currentStaff.role === "CASHIER";
+  const requiresPin = !hasPermission("canProcessReturns");
   const finalReason = selectedReason === "Other reason (specify below)" ? customReason.trim() : selectedReason;
 
   // Max returnable quantity per item

@@ -219,7 +219,7 @@ export function POSView() {
     setIsReceiptOpen(true);
     setCart([]);
     toast.success("Checkout completed successfully! Receipt generated.", { duration: 3000 });
-    } catch (error) { toast.error((error as Error).message); }
+    } catch (error) { return (error as Error).message; }
   };
 
   const CartContent = () => (

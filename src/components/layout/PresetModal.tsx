@@ -19,7 +19,7 @@ export function PresetModal({ isOpen, onClose }: PresetModalProps) {
   const { currentShopPreset, loadShopPreset } = useStore();
 
   const handleSelect = (key: "SARI_SARI" | "MOTOR_SHOP" | "PHARMACY" | "MILK_TEA") => {
-    loadShopPreset(key);
+    if (!loadShopPreset(key)) return;
     sound.chaChing();
     toast.success(`Switched to business template: ${ALL_SHOP_PRESETS[key].name}`);
     onClose();
