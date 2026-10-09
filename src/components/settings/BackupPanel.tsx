@@ -13,11 +13,16 @@ export function BackupPanel() {
     syncError,
     lastSyncedAt,
     signInWithEmail,
+    appMode,
+    importLegacyProduction,
+    isWorkspaceLoading,
+    pendingSyncCount,
   } = useStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [confirm, setConfirm] = useState(false);
+  const [legacyConfirm, setLegacyConfirm] = useState(false);
   return (
     <section className="m-4 sm:m-6 mb-0 panel p-5 space-y-4 shrink-0">
       <div className="flex gap-3">
@@ -27,8 +32,7 @@ export function BackupPanel() {
         <div>
           <h2 className="font-bold">Your data, within reach</h2>
           <p className="text-sm text-slate-500">
-            Sales and changes save on this device. Keep a backup before clearing
-            browser data.
+            {appMode === "PRODUCTION" ? "Changes save here first, then automatically to your business account. Keep this page open until it says Saved online." : "Demo changes save on this device. Download a backup before clearing browser data."}
           </p>
         </div>
       </div>
@@ -46,18 +50,19 @@ export function BackupPanel() {
         </button>
         <button
           className="secondary-button"
-          disabled={isSyncing}
+          disabled={isSyncing || isWorkspaceLoading}
           onClick={syncCloud}
         >
           <Cloud size={16} />
-          {isSyncing ? "Backing up…" : "Save cloud backup"}
+          {isSyncing ? "Saving…" : appMode === "PRODUCTION" ? "Retry / Save now" : "Save cloud backup"}
         </button>
         {sessionUser && (
-          <button className="secondary-button" onClick={() => setConfirm(true)}>
+          <button className="secondary-button" disabled={isSyncing || isWorkspaceLoading} onClick={() => setConfirm(true)}>
             <RotateCcw size={16} /> Restore cloud backup
           </button>
         )}
       </div>
+      {appMode === "PRODUCTION" && <p className="text-xs text-slate-600">Account: {sessionUser?.email} · {pendingSyncCount > 0 ? "Changes waiting to save online" : "No pending changes"}. Automatic saving retries after connection failures; conflicting records require your review.</p>}
       {lastSyncedAt && (
         <p className="text-xs text-emerald-700">
           Last successful cloud backup:{" "}
@@ -72,7 +77,7 @@ export function BackupPanel() {
           {syncError}
         </p>
       )}
-      {!sessionUser && (
+      {!sessionUser && appMode === "DEMO" && (
         <form
           className="flex flex-wrap gap-2 items-end"
           onSubmit={async (e) => {
@@ -108,6 +113,13 @@ export function BackupPanel() {
           {error && <p className="w-full text-red-600 text-sm">{error}</p>}
         </form>
       )}
+      {appMode === "PRODUCTION" && <div className="space-y-3">
+        <button className="secondary-button" disabled={isSyncing} onClick={() => setLegacyConfirm(true)}>Import earlier device workspace</button>
+        {legacyConfirm && <div className="p-4 bg-amber-50 rounded-xl text-sm">
+          <p>Replace this workspace with the Production records from before account sign-in was introduced? Only import data belonging to this business. Your current data and the original device records will be preserved as recovery copies.</p>
+          <div className="flex flex-wrap gap-3 mt-3"><button className="primary-button" onClick={() => { if (importLegacyProduction()) setLegacyConfirm(false); }}>Import into this account</button><button className="secondary-button" onClick={() => setLegacyConfirm(false)}>Cancel</button></div>
+        </div>}
+      </div>}
       {confirm && (
         <div className="p-4 bg-amber-50 rounded-xl text-sm">
           <p>

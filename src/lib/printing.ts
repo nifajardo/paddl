@@ -108,6 +108,12 @@ export function printDocument(
   doc.body.append(main);
   const job = crypto.randomUUID();
   try {
+    const session = JSON.parse(sessionStorage.getItem("PADDL_SESSION") || "null");
+    if (!session || !["DEMO", "PRODUCTION"].includes(session.mode) ||
+      (session.mode === "PRODUCTION" && !session.ownerId)) {
+      toast.error("Sign in to your workspace, reopen the document, and print again.");
+      return;
+    }
     // Distinct snapshots keep multiple print tabs independent and survive reload.
     for (const key of Object.keys(localStorage).filter((key) =>
       key.startsWith("PADDL_PRINT_"),
@@ -128,6 +134,8 @@ export function printDocument(
         title,
         html: "<!doctype html>" + doc.documentElement.outerHTML,
         createdAt: Date.now(),
+        mode: session.mode,
+        ownerId: session.mode === "PRODUCTION" ? session.ownerId : undefined,
       }),
     );
     const url = "/print?job=" + job;
@@ -138,6 +146,8 @@ export function printDocument(
       duration: 15000,
       action: {
         label: "Open here",
+        // The fallback opens an independent print document without carrying register state.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
         onClick: () => window.location.assign(url),
       },
     });

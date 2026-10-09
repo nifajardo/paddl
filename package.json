@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --experimental-strip-types --test scripts/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:cloud": "node --env-file-if-exists=.env.local scripts/check-cloud.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -72,9 +72,8 @@ export function ModeSwitcher({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <p className="text-xs text-slate-500">
-          Existing businesses require their staff PIN when opened. Production
-          Mode currently saves on this device, with optional manual cloud
-          backups.
+          Production requires your business account. Changes save on this
+          device first and automatically save online when connected.
         </p>
       </DialogContent>
     </Dialog>
@@ -189,8 +188,8 @@ export function ProductionSetup() {
         Create business workspace →
       </button>
       <p className="text-xs text-slate-500">
-        Keep a backup of your records. Staff PIN access is local to this device;
-        cloud backup sign-in is managed separately.
+        Your business account controls online access. The owner PIN is used
+        for local staff switching and approvals on this device.
       </p>
     </form>
   );

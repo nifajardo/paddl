@@ -13,6 +13,7 @@ import { useStore } from "@/context/StoreContext";
 import { ALL_SHOP_PRESETS, type ShopPreset } from "@/data/shopPresets";
 import { industryGuides } from "@/data/industryGuides";
 import { LoginModal } from "./LoginModal";
+import { BusinessLogin } from "./BusinessLogin";
 import {
   ModeSwitcher,
   ProductionSetup,
@@ -30,6 +31,11 @@ export function LoginScreen() {
     appMode,
     productionNeedsSetup,
     settings,
+    sessionUser,
+    passwordRecovery,
+    syncError,
+    logout,
+    syncCloud,
   } = useStore();
   const [login, setLogin] = useState(false);
   const [modes, setModes] = useState(false);
@@ -49,34 +55,33 @@ export function LoginScreen() {
         </div>
         <div className="flex gap-2">
           <button className="secondary-button" onClick={() => setModes(true)}>
-            {appMode === "DEMO" ? "Demo Mode" : "Production Mode"}
+            {appMode === "DEMO" ? "Demo Mode" : "Explore demo"}
           </button>
-          <button
-            className="secondary-button"
-            onClick={() => setLogin(true)}
-            disabled={productionNeedsSetup}
-          >
+          {appMode === "DEMO" && <button className="secondary-button" onClick={() => setLogin(true)}>
             <LockKeyhole size={15} /> Staff sign in
-          </button>
+          </button>}
         </div>
       </header>
       {appMode === "PRODUCTION" ? (
-        <main className="welcome-main">
-          {productionNeedsSetup ? (
-            <ProductionSetup />
-          ) : (
-            <div className="production-setup">
-              <div className="eyebrow">PRODUCTION MODE</div>
-              <h1>{settings.storeName}</h1>
-              <p>
-                Your business records are saved. Sign in with your staff PIN to
-                continue.
-              </p>
-              <button className="primary-button" onClick={() => setLogin(true)}>
-                Sign in to your business →
-              </button>
+        <main className="welcome-main auth-layout">
+          <section className="auth-intro">
+            <div className="eyebrow">PADDL FOR BUSINESS</div>
+            <h1>More time for<br /><span>your business.</span></h1>
+            <p>A clear view of your sales, stock, and customers, in one everyday workspace.</p>
+            <div className="auth-benefits">
+              <span><ShoppingBag size={20} /> Simple checkout and inventory</span>
+              <span><HardDrive size={20} /> Automatic saving to your account</span>
+              <span><LockKeyhole size={20} /> Separate records for each business owner</span>
             </div>
-          )}
+            <small>New here? Try an industry demo before setting up your business.</small>
+          </section>
+          <div className="auth-card-area">
+            {!sessionUser || passwordRecovery ? <BusinessLogin /> : productionNeedsSetup ? <>
+              {syncError && <div role="alert" className="auth-message mb-4">{syncError}<button className="auth-retry" onClick={() => syncCloud()}>Retry connection</button></div>}
+              <ProductionSetup />
+              <button className="auth-signout" onClick={logout}>Signed in as {sessionUser.email} - Sign out</button>
+            </> : <div className="production-setup"><h1>{settings.storeName}</h1><p>Choose your staff profile and enter its PIN to unlock this device.</p>{syncError && <p role="alert" className="auth-message">{syncError}</p>}<button className="primary-button" onClick={() => setLogin(true)}>Unlock workspace</button><button className="secondary-button" onClick={logout}>Sign out of account</button></div>}
+          </div>
         </main>
       ) : (
         <main className="welcome-main">

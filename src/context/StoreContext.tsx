@@ -4,10 +4,12 @@ import React, {
   createContext,
   useContext,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
 } from "react";
 import type { User } from "@supabase/supabase-js";
+import { usePathname } from "next/navigation";
 import type {
   Product,
   Customer,
@@ -38,6 +40,7 @@ import {
   type CheckoutInput,
 } from "@/lib/commerce";
 import { toast } from "sonner";
+import { reconcileCloud, cloudError, type CloudCheckpoint } from "@/lib/cloudSync";
 import {
   appMode,
   workspaceStorageKey,
@@ -64,6 +67,8 @@ export interface HeldCart {
 }
 interface StoreData {
   appMode?: AppMode;
+  accountOwnerId?: string;
+  cloudCheckpoint?: CloudCheckpoint;
   products: Product[];
   customers: Customer[];
   debtEntries: DebtEntry[];
@@ -85,7 +90,7 @@ interface StoreData {
 const ACTIVE = "PADDLR_CURRENT_PRESET";
 const MODE = "PADDL_APP_MODE";
 const storageKey = (s: StoreData) =>
-  workspaceStorageKey(s.currentShopPreset, appMode(s.appMode));
+  workspaceStorageKey(s.currentShopPreset, appMode(s.appMode), s.accountOwnerId);
 const id = (prefix: string) => prefix + "-" + crypto.randomUUID();
 const now = () => new Date().toISOString();
 function seed(key: PresetKey, mode: AppMode = "DEMO"): StoreData {
@@ -153,6 +158,12 @@ function validateBackup(value: unknown): asserts value is StoreData {
     Number.isSafeInteger(s.revision) && s.revision >= 0,
     "Invalid backup revision.",
   );
+  if (s.cloudCheckpoint) {
+    assert(Number.isSafeInteger(s.cloudCheckpoint.revision) && s.cloudCheckpoint.revision > 0 &&
+      Number.isSafeInteger(s.cloudCheckpoint.localRevision) && s.cloudCheckpoint.localRevision >= 0 &&
+      s.cloudCheckpoint.localRevision <= s.revision && Number.isFinite(Date.parse(s.cloudCheckpoint.savedAt)),
+      "Invalid cloud checkpoint.");
+  }
   const ids = new Set<string>();
   s.products.forEach((p) => {
     assert(p.id && !ids.has(p.id), "Duplicate or missing product ID.");
@@ -190,7 +201,8 @@ function validateBackup(value: unknown): asserts value is StoreData {
   assert(Number.isFinite(s.cashDrawer.expectedCash), "Invalid cash drawer.");
 }
 function useStoreState() {
-  const [state, setState] = useState<StoreData>(() => seed("SARI_SARI"));
+  const readOnlyPreview = usePathname() === "/print";
+  const [state, setState] = useState<StoreData>(() => seed("SARI_SARI", "PRODUCTION"));
   const ref = useRef(state);
   const [mounted, setMounted] = useState(false);
   const [isAuthenticated, setAuthenticated] = useState(false);
@@ -199,24 +211,39 @@ function useStoreState() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [sessionUser, setSessionUser] = useState<User | null>(null);
+  const [isSessionLoading, setSessionLoading] = useState(true);
+  const [isWorkspaceLoading, setWorkspaceLoading] = useState(false);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudRetry, setCloudRetry] = useState(0);
   const [isAuthLoading, setAuthLoading] = useState(false);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const account = useRef<string | null>(null);
+  const ownerLoginRequested = useRef(false);
+  const cloudEpoch = useRef(0);
+  const cloudBlocked = useRef(false);
+  const pinAttempts = useRef({ count: 0, until: 0 });
   const cloudRevision = useRef<number | null>(null);
   const cloudKey = useRef<string | null>(null);
-  const syncedLocalRevision = useRef(-1);
+  const [syncedLocalRevision, setSyncedLocalRevision] = useState(-1);
   const syncing = useRef(false);
   const ownerApproval = useRef(0);
   function apply(s: StoreData) {
     ref.current = s;
     setState(s);
   }
+  const sessionId = sessionUser?.id;
+  const finishWorkspaceLoad = useEffectEvent((staff?: StaffUser) => {
+    if (staff) startSession(staff);
+    setWorkspaceLoading(false);
+  });
   useEffect(() => {
     try {
       const selected = localStorage.getItem(ACTIVE) as PresetKey;
       const key = selected in ALL_SHOP_PRESETS ? selected : "SARI_SARI";
-      const mode = appMode(localStorage.getItem(MODE));
+      const mode = appMode(localStorage.getItem(MODE) ?? "PRODUCTION");
       const saved = localStorage.getItem(workspaceStorageKey(key, mode));
       let initial = seed(key, mode);
-      if (saved) {
+      if (saved && mode === "DEMO") {
         const parsed = JSON.parse(saved);
         validateBackup(parsed);
         assert(
@@ -237,12 +264,14 @@ function useStoreState() {
           initial = migrated;
         }
       }
+      // Browser storage is an external source and can only be hydrated after mount.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       apply(initial);
       const auth = JSON.parse(
         sessionStorage.getItem("PADDL_SESSION") || "null",
       );
       if (
-        auth?.staffId &&
+        mode === "DEMO" && auth?.staffId &&
         appMode(auth.mode) === mode &&
         (!auth.industry || auth.industry === key) &&
         initial.staffList.some((s) => s.id === auth.staffId && s.isActive)
@@ -278,12 +307,36 @@ function useStoreState() {
     window.addEventListener("offline", offline);
     window.addEventListener("storage", storage);
     const auth = supabase?.auth.onAuthStateChange((_event, session) => {
+      if (_event === "PASSWORD_RECOVERY") {
+        ownerLoginRequested.current = true;
+        setPasswordRecovery(true);
+        setAuthenticated(false);
+        localStorage.setItem(MODE, "PRODUCTION");
+        if (appMode(ref.current.appMode) !== "PRODUCTION") apply(seed(ref.current.currentShopPreset, "PRODUCTION"));
+      }
+      const nextAccount = session?.user.id || null;
+      if (!nextAccount) ownerLoginRequested.current = false;
+      if (account.current !== nextAccount) {
+        account.current = nextAccount;
+        cloudEpoch.current++;
+        cloudRevision.current = null;
+        cloudKey.current = null;
+        setSyncedLocalRevision(-1);
+        cloudBlocked.current = false;
+        setCloudReady(false);
+        setLastSyncedAt(null);
+        setSyncError(null);
+        ownerApproval.current = 0;
+        if (appMode(ref.current.appMode) === "PRODUCTION") {
+          setAuthenticated(false);
+          sessionStorage.removeItem("PADDL_SESSION");
+          apply(seed(ref.current.currentShopPreset, "PRODUCTION"));
+        }
+      }
       setSessionUser(session?.user || null);
-      cloudRevision.current = null;
-      cloudKey.current = null;
-      syncedLocalRevision.current = -1;
-      setLastSyncedAt(null);
+      setSessionLoading(false);
     });
+    if (!supabase) setSessionLoading(false);
     return () => {
       window.removeEventListener("online", online);
       window.removeEventListener("offline", offline);
@@ -291,13 +344,101 @@ function useStoreState() {
       auth?.data.subscription.unsubscribe();
     };
   }, []);
+  useEffect(() => {
+    if (readOnlyPreview || !mounted || isSessionLoading || appMode(state.appMode) !== "PRODUCTION" || !sessionId || !supabase) return;
+    const client = supabase;
+    const ownerId = sessionId;
+    const industry = state.currentShopPreset;
+    const workspace = cloudWorkspaceKey(industry, "PRODUCTION");
+    const epoch = ++cloudEpoch.current;
+    let cancelled = false;
+    const valid = () => !cancelled && epoch === cloudEpoch.current && account.current === ownerId;
+    // Lock this workspace while reconciling the external device and cloud records.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWorkspaceLoading(true);
+    setCloudReady(false);
+    cloudBlocked.current = false;
+    setSyncError(null);
+    let local: StoreData = { ...seed(industry, "PRODUCTION"), accountOwnerId: ownerId };
+    try {
+      const saved = localStorage.getItem(storageKey(local));
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        validateBackup(parsed);
+        assert(parsed.accountOwnerId === ownerId && parsed.currentShopPreset === industry && appMode(parsed.appMode) === "PRODUCTION", "Saved account workspace does not match.");
+        local = parsed;
+      }
+    } catch {
+      cloudBlocked.current = true;
+      setSyncError("Saved business data could not be loaded. Original data is preserved. Export it before recovery.");
+      setWorkspaceLoading(false);
+      return;
+    }
+    apply(local);
+    const initialDisk = localStorage.getItem(storageKey(local));
+    void (async () => {
+      try {
+        if (!navigator.onLine) throw new Error("Offline. Changes remain on this device and will save online when the connection returns.");
+        const { data, error } = await client.from("paddl_backups")
+          .select("revision,payload,updated_at").eq("owner_id", ownerId).eq("workspace", workspace).maybeSingle();
+        if (!valid()) return;
+        if (error) throw error;
+        if (localStorage.getItem(storageKey(local)) !== initialDisk) {
+          cloudBlocked.current = true;
+          throw new Error("This business changed in another tab while loading. Refresh before continuing. Use one active register.");
+        }
+        const decision = reconcileCloud(local.revision, local.cloudCheckpoint, data?.revision ?? null);
+        if (decision === "conflict") {
+          cloudBlocked.current = true;
+          throw new Error("Cloud and device records differ. Automatic saving is paused. Download this device's backup, then restore the cloud version in Settings.");
+        }
+        if (decision === "download" && data) {
+          validateBackup(data.payload);
+          assert(appMode(data.payload.appMode) === "PRODUCTION" && data.payload.currentShopPreset === industry, "Cloud workspace does not match.");
+          localStorage.setItem("PADDL_RECOVERY_" + Date.now(), JSON.stringify(local));
+          local = { ...data.payload, accountOwnerId: ownerId,
+            cloudCheckpoint: { revision: data.revision, localRevision: data.payload.revision, savedAt: data.updated_at } };
+          localStorage.setItem(storageKey(local), JSON.stringify(local));
+          apply(local);
+        }
+        cloudKey.current = ownerId + ":" + workspace;
+        cloudRevision.current = data?.revision ?? 0;
+        setSyncedLocalRevision(local.cloudCheckpoint?.localRevision ?? -1);
+        setLastSyncedAt(local.cloudCheckpoint?.savedAt ?? null);
+        setCloudReady(true);
+      } catch (e) {
+        if (valid()) setSyncError(cloudError(e as Error));
+      } finally {
+        if (valid()) {
+          const owner = local.staffList.find((staff) => staff.role === "OWNER" && staff.isActive && staff.pin);
+          let staff: StaffUser | undefined = ownerLoginRequested.current ? owner : undefined;
+          if (owner) {
+            const savedSession = sessionStorage.getItem("PADDL_SESSION");
+            try {
+              const parsed = JSON.parse(savedSession || "null");
+              if (parsed?.ownerId === ownerId && parsed.industry === industry && parsed.mode === "PRODUCTION")
+                staff = local.staffList.find((s) => s.id === parsed.staffId && s.isActive);
+            } catch { /* A corrupt staff session never changes the business data. */ }
+          }
+          ownerLoginRequested.current = false;
+          finishWorkspaceLoad(staff);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [readOnlyPreview, mounted, isSessionLoading, sessionId, state.currentShopPreset, state.appMode, isOnline, cloudRetry]);
   function commit<T>(operation: (draft: StoreData) => T): T {
     assert(mounted, "Store is still loading.");
+    assert(!readOnlyPreview, "Print previews cannot change business records.");
     const s = ref.current;
+    if (appMode(s.appMode) === "PRODUCTION")
+      assert(account.current && s.accountOwnerId === account.current && !isWorkspaceLoading,
+        "Sign in to your business account and wait for its workspace to load.");
     const disk = localStorage.getItem(storageKey(s));
     if (disk) {
       const latest = JSON.parse(disk);
       validateBackup(latest);
+      assert(latest.accountOwnerId === s.accountOwnerId, "Saved business account does not match.");
       if (latest.revision > s.revision) {
         validateBackup(latest);
         apply({ ...latest, currentStaff: s.currentStaff });
@@ -344,6 +485,8 @@ function useStoreState() {
     });
   }
   function hasPermission(permission: keyof StaffPermissions) {
+    if (appMode(ref.current.appMode) === "PRODUCTION" &&
+      (!isAuthenticated || !account.current || ref.current.accountOwnerId !== account.current)) return false;
     const staff = ref.current.currentStaff;
     if (!staff.isActive) return false;
     if (staff.role === "OWNER") return true;
@@ -919,21 +1062,37 @@ function useStoreState() {
         staffId: staff.id,
         mode: appMode(ref.current.appMode),
         industry: ref.current.currentShopPreset,
+        ownerId: ref.current.accountOwnerId,
       }),
     );
     setAuthenticated(true);
   }
   const loginWithPin = (sid: string, pin: string) => {
+    if (appMode(ref.current.appMode) === "PRODUCTION" &&
+      (!account.current || ref.current.accountOwnerId !== account.current))
+      return { success: false, error: "Sign in to the business account first." };
+    if (Date.now() < pinAttempts.current.until)
+      return { success: false, error: "Too many attempts. Wait one minute and try again." };
     const staff = ref.current.staffList.find((s) => s.id === sid && s.isActive);
-    if (!pin.trim() || !staff || staff.pin !== pin.trim())
+    if (!pin.trim() || !staff || staff.pin !== pin.trim()) {
+      pinAttempts.current.count++;
+      if (pinAttempts.current.count >= 5) {
+        pinAttempts.current = { count: 0, until: Date.now() + 60_000 };
+      }
       return {
         success: false,
         error: "Incorrect PIN or inactive staff account.",
       };
+    }
+    pinAttempts.current = { count: 0, until: 0 };
     startSession(staff);
     return { success: true };
   };
-  const switchStaff = (_sid: string) => {
+  const switchStaff = (sid: string) => {
+    if (!ref.current.staffList.some((staff) => staff.id === sid && staff.isActive)) {
+      toast.error("Choose an active staff member.");
+      return;
+    }
     toast.info("Use Switch staff and enter that staff member's PIN.");
   };
   const quickDemoLogin = (role: UserRole) => {
@@ -945,17 +1104,19 @@ function useStoreState() {
   };
   const loginWithEmail = async (email: string, password: string) => {
     if (!supabase)
-      return { error: "Cloud is not configured. Use a demo or staff PIN." };
+      return { error: "Business sign-in needs Supabase configuration. You can still explore Demo Mode." };
     setAuthLoading(true);
     try {
+      ownerLoginRequested.current = true;
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       });
       if (error) throw error;
       setSessionUser(data.user);
       return {};
     } catch (e) {
+      ownerLoginRequested.current = false;
       return { error: (e as Error).message };
     } finally {
       setAuthLoading(false);
@@ -969,13 +1130,14 @@ function useStoreState() {
     if (!supabase) return { error: "Cloud is not configured." };
     setAuthLoading(true);
     try {
-      const { error } = await supabase.auth.signUp({
-        email,
+      if (password.length < 12) return { error: "Use a password of at least 12 characters." };
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
         password,
-        options: { data: { store_name: storeName } },
+        options: { data: { store_name: storeName }, emailRedirectTo: window.location.origin },
       });
       if (error) throw error;
-      return { success: true };
+      return { success: true, needsConfirmation: !data.session };
     } catch (e) {
       return { error: (e as Error).message };
     } finally {
@@ -983,11 +1145,19 @@ function useStoreState() {
     }
   };
   const logout = async () => {
-    await supabase?.auth.signOut();
+    if (syncing.current) {
+      toast.info("Wait for the current cloud save to finish before signing out.");
+      return;
+    }
+    const pending = appMode(ref.current.appMode) === "PRODUCTION" && ref.current.revision > 0 &&
+      ref.current.cloudCheckpoint?.localRevision !== ref.current.revision;
+    const result = await supabase?.auth.signOut({ scope: "local" });
+    if (result?.error) { toast.error(result.error.message); return; }
     setSessionUser(null);
     setAuthenticated(false);
     sessionStorage.removeItem("PADDL_SESSION");
     ownerApproval.current = 0;
+    if (pending) toast.info("Some changes are saved only on this device. Sign back in here to finish saving them online.");
   };
   const loadShopPreset = (key: PresetKey) => {
     try {
@@ -1012,7 +1182,7 @@ function useStoreState() {
       apply(next);
       cloudRevision.current = null;
       cloudKey.current = null;
-      syncedLocalRevision.current = -1;
+      setSyncedLocalRevision(-1);
       setLastSyncedAt(null);
       setSyncError(null);
       ownerApproval.current = 0;
@@ -1027,6 +1197,7 @@ function useStoreState() {
     industry: PresetKey = ref.current.currentShopPreset,
   ) => {
     try {
+      if (mode === appMode(ref.current.appMode) && industry === ref.current.currentShopPreset) return true;
       assert(
         !syncing.current,
         "Wait for the cloud backup to finish before switching modes.",
@@ -1034,12 +1205,12 @@ function useStoreState() {
       if (isAuthenticated) requirePermission("canManageSettings");
       assert(industry in ALL_SHOP_PRESETS, "Choose a valid industry.");
       const current = ref.current;
-      const saved = localStorage.getItem(workspaceStorageKey(industry, mode));
+      const saved = mode === "DEMO" ? localStorage.getItem(workspaceStorageKey(industry, mode)) : null;
       const next = saved ? JSON.parse(saved) : seed(industry, mode);
       validateBackup(next);
       assert(appMode(next.appMode) === mode, "Workspace mode does not match.");
       const disk = localStorage.getItem(storageKey(current));
-      if (disk) {
+      if (disk && (appMode(current.appMode) === "DEMO" || current.accountOwnerId)) {
         const latest = JSON.parse(disk);
         validateBackup(latest);
         assert(
@@ -1047,8 +1218,9 @@ function useStoreState() {
           "This workspace changed in another tab. Refresh before switching modes.",
         );
       }
-      localStorage.setItem(storageKey(current), JSON.stringify(current));
-      localStorage.setItem(storageKey(next), JSON.stringify(next));
+      if (appMode(current.appMode) === "DEMO" || current.accountOwnerId)
+        localStorage.setItem(storageKey(current), JSON.stringify(current));
+      if (mode === "DEMO") localStorage.setItem(storageKey(next), JSON.stringify(next));
       localStorage.setItem(ACTIVE, industry);
       localStorage.setItem(MODE, mode);
       sessionStorage.removeItem("PADDL_SESSION");
@@ -1056,7 +1228,10 @@ function useStoreState() {
       ownerApproval.current = 0;
       cloudRevision.current = null;
       cloudKey.current = null;
-      syncedLocalRevision.current = -1;
+      setSyncedLocalRevision(-1);
+      cloudEpoch.current++;
+      cloudBlocked.current = false;
+      setCloudReady(false);
       setLastSyncedAt(null);
       setSyncError(null);
       apply(next);
@@ -1078,12 +1253,15 @@ function useStoreState() {
         appMode(ref.current.appMode) === "PRODUCTION",
         "Switch to Production Mode first.",
       );
+      assert(account.current && ref.current.accountOwnerId === account.current,
+        "Sign in to your business account before setup.");
       assert(
         !ref.current.staffList.some(
           (staff) => staff.role === "OWNER" && staff.pin,
         ),
         "This business is already set up. Sign in with your owner PIN.",
       );
+      assert(!cloudBlocked.current, "Resolve the cloud conflict before creating a business.");
       assert(
         details.storeName.trim() && details.ownerName.trim(),
         "Enter your business and owner names.",
@@ -1124,6 +1302,12 @@ function useStoreState() {
   const importDataJson = (json: string) => {
     try {
       requirePermission("canManageSettings");
+      const disk = localStorage.getItem(storageKey(ref.current));
+      if (disk) {
+        const latest = JSON.parse(disk);
+        validateBackup(latest);
+        assert(latest.revision <= ref.current.revision, "Another tab changed this business. Refresh before restoring.");
+      }
       const data = JSON.parse(json);
       validateBackup(data);
       assert(
@@ -1140,6 +1324,8 @@ function useStoreState() {
           JSON.stringify(ref.current),
       );
       data.revision = ref.current.revision + 1;
+      data.accountOwnerId = ref.current.accountOwnerId;
+      data.cloudCheckpoint = ref.current.cloudCheckpoint;
       localStorage.setItem(storageKey(data), JSON.stringify(data));
       apply(data);
       ownerApproval.current = 0;
@@ -1168,18 +1354,26 @@ function useStoreState() {
       toast.error((e as Error).message);
     }
   };
-  const syncCloud = async () => {
+  const syncCloud = async (automatic = false) => {
+    if (readOnlyPreview) return;
     if (syncing.current) return;
     if (!supabase || !sessionUser) {
-      toast.info(
+      if (!automatic) toast.info(
         "Saved on this device. Sign in to cloud in Settings to back it up.",
       );
       return;
     }
     if (!navigator.onLine) {
-      toast.info("You are offline. Changes remain saved on this device.");
+      if (!automatic) toast.info("You are offline. Changes remain saved on this device.");
       return;
     }
+    const production = appMode(ref.current.appMode) === "PRODUCTION";
+    if (production && !ref.current.staffList.some((s) => s.role === "OWNER" && s.pin)) return;
+    if (production && (!cloudReady || cloudBlocked.current)) {
+      if (!automatic && !cloudBlocked.current) setCloudRetry((n) => n + 1);
+      return;
+    }
+    if (production && ref.current.cloudCheckpoint?.localRevision === ref.current.revision) return;
     syncing.current = true;
     setSyncing(true);
     setSyncError(null);
@@ -1189,6 +1383,9 @@ function useStoreState() {
       appMode(snapshot.appMode),
     );
     const key = sessionUser.id + ":" + workspace;
+    const epoch = cloudEpoch.current;
+    const valid = () => epoch === cloudEpoch.current && account.current === sessionUser.id &&
+      cloudWorkspaceKey(ref.current.currentShopPreset, appMode(ref.current.appMode)) === workspace;
     try {
       if (cloudKey.current !== key) {
         const { data, error } = await supabase
@@ -1198,6 +1395,7 @@ function useStoreState() {
           .eq("workspace", workspace)
           .maybeSingle();
         if (error) throw error;
+        if (!valid()) return;
         assert(
           !data,
           "A cloud backup already exists. Restore it in Settings before saving from this device to avoid overwriting another device's work.",
@@ -1211,19 +1409,62 @@ function useStoreState() {
         p_payload: snapshot,
       });
       if (error) throw error;
+      if (!valid()) return;
+      assert(Number.isSafeInteger(Number(data)) && Number(data) > 0, "Invalid cloud save revision.");
       cloudRevision.current = Number(data);
-      syncedLocalRevision.current = snapshot.revision;
-      setLastSyncedAt(now());
-      toast.success("Cloud backup saved.");
+      setSyncedLocalRevision(snapshot.revision);
+      const savedAt = now();
+      setLastSyncedAt(savedAt);
+      if (production) {
+        const checkpoint = { revision: Number(data), localRevision: snapshot.revision, savedAt };
+        const latest = ref.current;
+        const disk = localStorage.getItem(storageKey(latest));
+        const persisted = disk ? JSON.parse(disk) : latest;
+        validateBackup(persisted);
+        const next = { ...(persisted.revision > latest.revision ? persisted : latest), cloudCheckpoint: checkpoint };
+        localStorage.setItem(storageKey(next), JSON.stringify(next));
+        apply(next);
+      }
+      if (!automatic) toast.success("Cloud backup saved.");
     } catch (e) {
-      const message = (e as Error).message || "Cloud backup failed.";
-      setSyncError(message);
-      toast.error(message);
+      if (valid()) {
+        const message = cloudError(e as Error);
+        if (/conflict|already exists/i.test(message)) cloudBlocked.current = true;
+        setSyncError(message);
+        if (!automatic) toast.error(message);
+      }
     } finally {
       syncing.current = false;
       setSyncing(false);
     }
   };
+  const autoSave = useEffectEvent(() => void syncCloud(true));
+  useEffect(() => {
+    if (readOnlyPreview || !mounted || appMode(state.appMode) !== "PRODUCTION" || !sessionId || !isOnline || cloudReady || isWorkspaceLoading || cloudBlocked.current || syncError?.startsWith("Cloud storage needs setup")) return;
+    const retry = window.setInterval(() => setCloudRetry((n) => n + 1), 15_000);
+    return () => window.clearInterval(retry);
+  }, [readOnlyPreview, mounted, state.appMode, sessionId, isOnline, cloudReady, isWorkspaceLoading, syncError]);
+  useEffect(() => {
+    if (readOnlyPreview || !mounted || appMode(state.appMode) !== "PRODUCTION" || !sessionId || !isOnline || !cloudReady || isWorkspaceLoading) return;
+    const timer = window.setTimeout(autoSave, 800);
+    const retry = window.setInterval(autoSave, 15_000);
+    const focus = () => {
+      if (!syncing.current && !cloudBlocked.current) setCloudRetry((n) => n + 1);
+    };
+    window.addEventListener("focus", focus);
+    return () => { window.clearTimeout(timer); window.clearInterval(retry); window.removeEventListener("focus", focus); };
+  }, [readOnlyPreview, mounted, state.appMode, state.revision, sessionId, isOnline, cloudReady, isWorkspaceLoading]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (appMode(ref.current.appMode) === "PRODUCTION" && ref.current.revision > 0 &&
+        ref.current.cloudCheckpoint?.localRevision !== ref.current.revision) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
   const restoreCloud = async () => {
     if (!supabase || !sessionUser) {
       toast.error("Sign in to cloud first.");
@@ -1233,6 +1474,10 @@ function useStoreState() {
     const mode = appMode(ref.current.appMode);
     const workspace = cloudWorkspaceKey(key, mode);
     const localRevision = ref.current.revision;
+    if (syncing.current) return;
+    syncing.current = true;
+    setSyncing(true);
+    const epoch = cloudEpoch.current;
     try {
       requirePermission("canManageSettings");
       const { data, error } = await supabase
@@ -1245,15 +1490,23 @@ function useStoreState() {
       assert(
         ref.current.currentShopPreset === key &&
           appMode(ref.current.appMode) === mode &&
-          ref.current.revision === localRevision,
+          ref.current.revision === localRevision && epoch === cloudEpoch.current && account.current === sessionUser.id,
         "Workspace changed while downloading. Try again.",
       );
       validateBackup(data.payload);
       if (importDataJson(JSON.stringify(data.payload))) {
         cloudRevision.current = data.revision;
         cloudKey.current = sessionUser.id + ":" + workspace;
-        syncedLocalRevision.current = ref.current.revision;
-        setLastSyncedAt(now());
+        setSyncedLocalRevision(ref.current.revision);
+        const savedAt = now();
+        if (mode === "PRODUCTION") {
+          const next = { ...ref.current, cloudCheckpoint: { revision: data.revision, localRevision: ref.current.revision, savedAt } };
+          localStorage.setItem(storageKey(next), JSON.stringify(next));
+          apply(next);
+          cloudBlocked.current = false;
+          setCloudReady(true);
+        }
+        setLastSyncedAt(savedAt);
         setSyncError(null);
         toast.success(
           "Cloud backup restored. A recovery copy of this device was saved.",
@@ -1261,6 +1514,9 @@ function useStoreState() {
       }
     } catch (e) {
       toast.error((e as Error).message);
+    } finally {
+      syncing.current = false;
+      setSyncing(false);
     }
   };
   const setCart = (
@@ -1290,7 +1546,7 @@ function useStoreState() {
     });
   const pendingSyncCount = Math.max(
     0,
-    state.revision - syncedLocalRevision.current,
+    state.revision - (state.cloudCheckpoint?.localRevision ?? syncedLocalRevision),
   );
   const syncStatus = !isOnline
     ? "offline"
@@ -1310,9 +1566,15 @@ function useStoreState() {
     switchAppMode,
     setupProduction,
     mounted,
+    isSessionLoading,
+    isWorkspaceLoading,
+    cloudReady,
     isOnline,
-    isAuthenticated,
+    isAuthenticated: isAuthenticated && (appMode(state.appMode) === "DEMO" ||
+      (!!sessionUser && state.accountOwnerId === sessionUser.id)),
     isAuthLoading,
+    passwordRecovery,
+    finishPasswordRecovery: () => setPasswordRecovery(false),
     isSyncing,
     syncStatus,
     syncError,
@@ -1362,8 +1624,13 @@ function useStoreState() {
     signInWithEmail: loginWithEmail,
     signOut: logout,
     loadShopPreset,
-    syncCloud,
+    syncCloud: () => syncCloud(false),
     restoreCloud,
+    importLegacyProduction: () => {
+      const saved = localStorage.getItem(workspaceStorageKey(ref.current.currentShopPreset, "PRODUCTION"));
+      if (!saved) { toast.info("No earlier business data was found on this device."); return false; }
+      return importDataJson(saved);
+    },
     exportDataJson,
     importDataJson,
     resetToDemoData,

@@ -4,10 +4,11 @@ export const appMode = (value: unknown): AppMode =>
 export const workspaceStorageKey = (
   industry: string,
   mode: AppMode = "DEMO",
+  ownerId?: string,
 ) =>
   mode === "DEMO"
     ? "PADDL_WORKSPACE_V4_" + industry
-    : "PADDL_PRODUCTION_V1_" + industry;
+    : "PADDL_PRODUCTION_V1_" + industry + (ownerId ? ":" + ownerId : "");
 export const cloudWorkspaceKey = (industry: string, mode: AppMode = "DEMO") =>
   mode === "DEMO" ? industry : "PRODUCTION_" + industry;
 import type { StoreSettings, StaffUser, CashDrawerShift } from "../types/index";

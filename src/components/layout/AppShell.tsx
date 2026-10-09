@@ -12,7 +12,6 @@ import {
   LockKeyhole,
   Menu,
   Package,
-  Plus,
   ReceiptText,
   Search,
   Settings,
@@ -20,7 +19,6 @@ import {
   Sparkles,
   Store,
   Truck,
-  Users,
   WifiOff,
   X,
 } from "lucide-react";
@@ -70,6 +68,10 @@ const navigation = [
   { id: "settings", label: "Settings", icon: Settings },
 ] as const;
 export function AppShell() {
+  const { currentStaff, currentShopPreset, appMode } = useStore();
+  return <WorkspaceShell key={[currentStaff.id, currentStaff.role, currentShopPreset, appMode].join(":")} />;
+}
+function WorkspaceShell() {
   const store = useStore();
   const {
     settings,
@@ -84,7 +86,8 @@ export function AppShell() {
     logout,
     appMode,
   } = store;
-  const [activeTab, setTab] = useState<NavTab>("dashboard");
+  const [activeTab, setTab] = useState<NavTab>(() =>
+    currentStaff.role === "OWNER" || currentStaff.role === "MANAGER" ? "dashboard" : "pos");
   const [mobileNav, setMobileNav] = useState(false);
   const [presetOpen, setPresetOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
@@ -132,20 +135,13 @@ export function AppShell() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, []);
-  useEffect(() => {
-    setTab(
-      currentStaff.role === "OWNER" || currentStaff.role === "MANAGER"
-        ? "dashboard"
-        : "pos",
-    );
-  }, [currentStaff.id, currentShopPreset, appMode]);
-  if (!mounted)
+  if (!mounted || store.isSessionLoading || store.isWorkspaceLoading)
     return (
       <div className="h-dvh grid place-items-center bg-[#f5f7f6] text-emerald-800">
         Opening your workspace…
       </div>
     );
-  if (!isAuthenticated) return <LoginScreen />;
+  if (!isAuthenticated || store.passwordRecovery) return <LoginScreen />;
   return (
     <div
       className={
@@ -284,11 +280,13 @@ export function AppShell() {
               title="Backup and connection status"
             >
               {isOnline ? <HardDrive size={14} /> : <WifiOff size={14} />}
-              <span className="hidden sm:inline">
+              <span>
                 {store.syncStatus === "synced"
-                  ? "Backed up"
+                  ? "Saved online"
                   : store.syncStatus === "syncing"
-                    ? "Backing up…"
+                    ? "Saving…"
+                    : store.syncStatus === "error"
+                      ? "Save needs attention"
                     : !isOnline
                       ? "Offline · local"
                       : "Saved on device"}
@@ -305,6 +303,7 @@ export function AppShell() {
             </button>
           </div>
         </header>
+        {appMode === "PRODUCTION" && store.syncError && <div className="connection-banner" role="alert">{store.syncError}<button className="auth-retry" onClick={() => navigate("settings")}>Open data settings</button></div>}
         {!isOnline && (
           <div className="connection-banner">
             You’re offline. This open workspace can still save on your device.
